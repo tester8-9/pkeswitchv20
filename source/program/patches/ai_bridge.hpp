@@ -1,6 +1,6 @@
 #pragma once
 
-// AI Bridge V26 - fresh-board switch scorer.
+// AI Bridge V26 FIXED - fresh-board switch scorer.
 // Goals:
 // - use the real switch-candidate rows the engine already creates;
 // - ignore stale target records after the player switches;
@@ -38,10 +38,10 @@ namespace AIBridge {
     inline u32 recent_target_generation = 0;
 
     enum Type : u8 {
-        NORMAL=0, FIGHTING=1, FLYING=2, POISON=3, GROUND=4, ROCK=5,
-        BUG=6, GHOST=7, STEEL=8, FIRE=9, WATER=10, GRASS=11,
-        ELECTRIC=12, PSYCHIC=13, ICE=14, DRAGON=15, DARK=16, FAIRY=17,
-        NONE=0xFF
+        BT_NORMAL=0, BT_FIGHTING=1, BT_FLYING=2, BT_POISON=3, BT_GROUND=4, BT_ROCK=5,
+        BT_BUG=6, BT_GHOST=7, BT_STEEL=8, BT_FIRE=9, BT_WATER=10, BT_GRASS=11,
+        BT_ELECTRIC=12, BT_PSYCHIC=13, BT_ICE=14, BT_DRAGON=15, BT_DARK=16, BT_FAIRY=17,
+        BT_NONE=0xFF
     };
     struct SpeciesTypes { u8 t1; u8 t2; };
     struct TeamDef { u16 trainer_id; u8 count; u16 species[6]; };
@@ -67,12 +67,12 @@ namespace AIBridge {
 
     static inline const char* TypeName(u8 t) {
         switch (t) {
-            case NORMAL: return "Normal"; case FIGHTING: return "Fighting"; case FLYING: return "Flying";
-            case POISON: return "Poison"; case GROUND: return "Ground"; case ROCK: return "Rock";
-            case BUG: return "Bug"; case GHOST: return "Ghost"; case STEEL: return "Steel";
-            case FIRE: return "Fire"; case WATER: return "Water"; case GRASS: return "Grass";
-            case ELECTRIC: return "Electric"; case PSYCHIC: return "Psychic"; case ICE: return "Ice";
-            case DRAGON: return "Dragon"; case DARK: return "Dark"; case FAIRY: return "Fairy";
+            case BT_NORMAL: return "Normal"; case BT_FIGHTING: return "Fighting"; case BT_FLYING: return "Flying";
+            case BT_POISON: return "Poison"; case BT_GROUND: return "Ground"; case BT_ROCK: return "Rock";
+            case BT_BUG: return "Bug"; case BT_GHOST: return "Ghost"; case BT_STEEL: return "Steel";
+            case BT_FIRE: return "Fire"; case BT_WATER: return "Water"; case BT_GRASS: return "Grass";
+            case BT_ELECTRIC: return "Electric"; case BT_PSYCHIC: return "Psychic"; case BT_ICE: return "Ice";
+            case BT_DRAGON: return "Dragon"; case BT_DARK: return "Dark"; case BT_FAIRY: return "Fairy";
             default: return "None";
         }
     }
@@ -100,65 +100,65 @@ namespace AIBridge {
     }
     static inline SpeciesTypes Types(u16 s) {
         switch (s) {
-            case 448: return {FIGHTING, STEEL};
-            case 475: return {PSYCHIC, FIGHTING};
-            case 534: return {FIGHTING, NONE};
-            case 620: return {FIGHTING, NONE};
-            case 675: return {FIGHTING, DARK};
-            case 815: return {FIRE, NONE};
-            case 861: return {DARK, FAIRY};
-            case 869: return {FAIRY, NONE};
-            case 858: return {PSYCHIC, FAIRY};
-            case 823: return {FLYING, STEEL};
-            case 812: return {GRASS, NONE};
-            case 887: return {DRAGON, GHOST};
-            case 778: return {GHOST, FAIRY};
-            case 530: return {GROUND, STEEL};
-            case 248: return {ROCK, DARK};
-            case 468: return {FAIRY, FLYING};
-            case 876: return {PSYCHIC, NORMAL};
-            default: return {NONE, NONE};
+            case 448: return {BT_FIGHTING, BT_STEEL};
+            case 475: return {BT_PSYCHIC, BT_FIGHTING};
+            case 534: return {BT_FIGHTING, BT_NONE};
+            case 620: return {BT_FIGHTING, BT_NONE};
+            case 675: return {BT_FIGHTING, BT_DARK};
+            case 815: return {BT_FIRE, BT_NONE};
+            case 861: return {BT_DARK, BT_FAIRY};
+            case 869: return {BT_FAIRY, BT_NONE};
+            case 858: return {BT_PSYCHIC, BT_FAIRY};
+            case 823: return {BT_FLYING, BT_STEEL};
+            case 812: return {BT_GRASS, BT_NONE};
+            case 887: return {BT_DRAGON, BT_GHOST};
+            case 778: return {BT_GHOST, BT_FAIRY};
+            case 530: return {BT_GROUND, BT_STEEL};
+            case 248: return {BT_ROCK, BT_DARK};
+            case 468: return {BT_FAIRY, BT_FLYING};
+            case 876: return {BT_PSYCHIC, BT_NORMAL};
+            default: return {BT_NONE, BT_NONE};
         }
     }
-    static inline bool HasTypes(SpeciesTypes t) { return t.t1 != NONE; }
+    static inline bool HasTypes(SpeciesTypes t) { return t.t1 != BT_NONE; }
     static inline bool HasType(SpeciesTypes t, u8 x) { return t.t1 == x || t.t2 == x; }
 
     // Effectiveness in quarter-units: 0, 1=0.25x, 2=0.5x, 4=1x, 8=2x, 16=4x.
     static inline u8 OneTypeQ4(u8 a, u8 d) {
-        if (a == NONE || d == NONE) return 4;
+        if (a == BT_NONE || d == BT_NONE) return 4;
         switch (a) {
-            case NORMAL: if (d==ROCK||d==STEEL) return 2; if (d==GHOST) return 0; return 4;
-            case FIGHTING: if (d==NORMAL||d==ROCK||d==STEEL||d==ICE||d==DARK) return 8; if (d==FLYING||d==POISON||d==BUG||d==PSYCHIC||d==FAIRY) return 2; if (d==GHOST) return 0; return 4;
-            case FLYING: if (d==FIGHTING||d==BUG||d==GRASS) return 8; if (d==ROCK||d==STEEL||d==ELECTRIC) return 2; return 4;
-            case POISON: if (d==GRASS||d==FAIRY) return 8; if (d==POISON||d==GROUND||d==ROCK||d==GHOST) return 2; if (d==STEEL) return 0; return 4;
-            case GROUND: if (d==POISON||d==ROCK||d==STEEL||d==FIRE||d==ELECTRIC) return 8; if (d==BUG||d==GRASS) return 2; if (d==FLYING) return 0; return 4;
-            case ROCK: if (d==FLYING||d==BUG||d==FIRE||d==ICE) return 8; if (d==FIGHTING||d==GROUND||d==STEEL) return 2; return 4;
-            case BUG: if (d==GRASS||d==PSYCHIC||d==DARK) return 8; if (d==FIGHTING||d==FLYING||d==POISON||d==GHOST||d==STEEL||d==FIRE||d==FAIRY) return 2; return 4;
-            case GHOST: if (d==GHOST||d==PSYCHIC) return 8; if (d==DARK) return 2; if (d==NORMAL) return 0; return 4;
-            case STEEL: if (d==ROCK||d==ICE||d==FAIRY) return 8; if (d==STEEL||d==FIRE||d==WATER||d==ELECTRIC) return 2; return 4;
-            case FIRE: if (d==BUG||d==STEEL||d==GRASS||d==ICE) return 8; if (d==ROCK||d==FIRE||d==WATER||d==DRAGON) return 2; return 4;
-            case WATER: if (d==GROUND||d==ROCK||d==FIRE) return 8; if (d==WATER||d==GRASS||d==DRAGON) return 2; return 4;
-            case GRASS: if (d==GROUND||d==ROCK||d==WATER) return 8; if (d==FLYING||d==POISON||d==BUG||d==STEEL||d==FIRE||d==GRASS||d==DRAGON) return 2; return 4;
-            case ELECTRIC: if (d==FLYING||d==WATER) return 8; if (d==GRASS||d==ELECTRIC||d==DRAGON) return 2; if (d==GROUND) return 0; return 4;
-            case PSYCHIC: if (d==FIGHTING||d==POISON) return 8; if (d==STEEL||d==PSYCHIC) return 2; if (d==DARK) return 0; return 4;
-            case ICE: if (d==FLYING||d==GROUND||d==GRASS||d==DRAGON) return 8; if (d==STEEL||d==FIRE||d==WATER||d==ICE) return 2; return 4;
-            case DRAGON: if (d==DRAGON) return 8; if (d==STEEL) return 2; if (d==FAIRY) return 0; return 4;
-            case DARK: if (d==GHOST||d==PSYCHIC) return 8; if (d==FIGHTING||d==DARK||d==FAIRY) return 2; return 4;
-            case FAIRY: if (d==FIGHTING||d==DRAGON||d==DARK) return 8; if (d==POISON||d==STEEL||d==FIRE) return 2; return 4;
+            case BT_NORMAL: if (d==BT_ROCK||d==BT_STEEL) return 2; if (d==BT_GHOST) return 0; return 4;
+            case BT_FIGHTING: if (d==BT_NORMAL||d==BT_ROCK||d==BT_STEEL||d==BT_ICE||d==BT_DARK) return 8; if (d==BT_FLYING||d==BT_POISON||d==BT_BUG||d==BT_PSYCHIC||d==BT_FAIRY) return 2; if (d==BT_GHOST) return 0; return 4;
+            case BT_FLYING: if (d==BT_FIGHTING||d==BT_BUG||d==BT_GRASS) return 8; if (d==BT_ROCK||d==BT_STEEL||d==BT_ELECTRIC) return 2; return 4;
+            case BT_POISON: if (d==BT_GRASS||d==BT_FAIRY) return 8; if (d==BT_POISON||d==BT_GROUND||d==BT_ROCK||d==BT_GHOST) return 2; if (d==BT_STEEL) return 0; return 4;
+            case BT_GROUND: if (d==BT_POISON||d==BT_ROCK||d==BT_STEEL||d==BT_FIRE||d==BT_ELECTRIC) return 8; if (d==BT_BUG||d==BT_GRASS) return 2; if (d==BT_FLYING) return 0; return 4;
+            case BT_ROCK: if (d==BT_FLYING||d==BT_BUG||d==BT_FIRE||d==BT_ICE) return 8; if (d==BT_FIGHTING||d==BT_GROUND||d==BT_STEEL) return 2; return 4;
+            case BT_BUG: if (d==BT_GRASS||d==BT_PSYCHIC||d==BT_DARK) return 8; if (d==BT_FIGHTING||d==BT_FLYING||d==BT_POISON||d==BT_GHOST||d==BT_STEEL||d==BT_FIRE||d==BT_FAIRY) return 2; return 4;
+            case BT_GHOST: if (d==BT_GHOST||d==BT_PSYCHIC) return 8; if (d==BT_DARK) return 2; if (d==BT_NORMAL) return 0; return 4;
+            case BT_STEEL: if (d==BT_ROCK||d==BT_ICE||d==BT_FAIRY) return 8; if (d==BT_STEEL||d==BT_FIRE||d==BT_WATER||d==BT_ELECTRIC) return 2; return 4;
+            case BT_FIRE: if (d==BT_BUG||d==BT_STEEL||d==BT_GRASS||d==BT_ICE) return 8; if (d==BT_ROCK||d==BT_FIRE||d==BT_WATER||d==BT_DRAGON) return 2; return 4;
+            case BT_WATER: if (d==BT_GROUND||d==BT_ROCK||d==BT_FIRE) return 8; if (d==BT_WATER||d==BT_GRASS||d==BT_DRAGON) return 2; return 4;
+            case BT_GRASS: if (d==BT_GROUND||d==BT_ROCK||d==BT_WATER) return 8; if (d==BT_FLYING||d==BT_POISON||d==BT_BUG||d==BT_STEEL||d==BT_FIRE||d==BT_GRASS||d==BT_DRAGON) return 2; return 4;
+            case BT_ELECTRIC: if (d==BT_FLYING||d==BT_WATER) return 8; if (d==BT_GRASS||d==BT_ELECTRIC||d==BT_DRAGON) return 2; if (d==BT_GROUND) return 0; return 4;
+            case BT_PSYCHIC: if (d==BT_FIGHTING||d==BT_POISON) return 8; if (d==BT_STEEL||d==BT_PSYCHIC) return 2; if (d==BT_DARK) return 0; return 4;
+            case BT_ICE: if (d==BT_FLYING||d==BT_GROUND||d==BT_GRASS||d==BT_DRAGON) return 8; if (d==BT_STEEL||d==BT_FIRE||d==BT_WATER||d==BT_ICE) return 2; return 4;
+            case BT_DRAGON: if (d==BT_DRAGON) return 8; if (d==BT_STEEL) return 2; if (d==BT_FAIRY) return 0; return 4;
+            case BT_DARK: if (d==BT_GHOST||d==BT_PSYCHIC) return 8; if (d==BT_FIGHTING||d==BT_DARK||d==BT_FAIRY) return 2; return 4;
+            case BT_FAIRY: if (d==BT_FIGHTING||d==BT_DRAGON||d==BT_DARK) return 8; if (d==BT_POISON||d==BT_STEEL||d==BT_FIRE) return 2; return 4;
             default: return 4;
         }
     }
     static inline u8 EffectQ4(u8 a, SpeciesTypes d) {
-        if (d.t1 == NONE) return 4;
+        if (d.t1 == BT_NONE) return 4;
         u32 r = OneTypeQ4(a, d.t1);
-        if (d.t2 != NONE) r = (r * OneTypeQ4(a, d.t2)) / 4;
+        if (d.t2 != BT_NONE) r = (r * OneTypeQ4(a, d.t2)) / 4;
         return static_cast<u8>(r);
     }
     static inline u8 BestStabQ4(u16 attacker, u16 defender) {
         const SpeciesTypes at = Types(attacker); const SpeciesTypes df = Types(defender);
         if (!HasTypes(at) || !HasTypes(df)) return 4;
         u8 best = EffectQ4(at.t1, df);
-        if (at.t2 != NONE) { const u8 b = EffectQ4(at.t2, df); if (b > best) best = b; }
+        if (at.t2 != BT_NONE) { const u8 b = EffectQ4(at.t2, df); if (b > best) best = b; }
         return best;
     }
 
@@ -168,11 +168,11 @@ namespace AIBridge {
         u8 best = 4;
         auto consider = [&](u8 t){ const u8 e = EffectQ4(t, defender); if (e > best) best = e; };
         const SpeciesTypes st = Types(threat);
-        if (st.t1 != NONE) consider(st.t1); if (st.t2 != NONE) consider(st.t2);
-        if (threat == 815) { consider(FIRE); consider(STEEL); consider(FIGHTING); consider(DARK); consider(NORMAL); }
-        if (threat == 658) { consider(WATER); consider(DARK); consider(ICE); consider(POISON); consider(GRASS); }
-        if (threat == 861) { consider(DARK); consider(FAIRY); }
-        if (threat == 869) { consider(FAIRY); consider(PSYCHIC); }
+        if (st.t1 != BT_NONE) consider(st.t1); if (st.t2 != BT_NONE) consider(st.t2);
+        if (threat == 815) { consider(BT_FIRE); consider(BT_STEEL); consider(BT_FIGHTING); consider(BT_DARK); consider(BT_NORMAL); }
+        if (threat == 658) { consider(BT_WATER); consider(BT_DARK); consider(BT_ICE); consider(BT_POISON); consider(BT_GRASS); }
+        if (threat == 861) { consider(BT_DARK); consider(BT_FAIRY); }
+        if (threat == 869) { consider(BT_FAIRY); consider(BT_PSYCHIC); }
         return best;
     }
 
