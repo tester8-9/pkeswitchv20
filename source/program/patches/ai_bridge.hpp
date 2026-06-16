@@ -578,7 +578,6 @@ namespace AIBridge {
                 return false;
         }
     }
-    }
 
     static inline u16 SpeciesFromEvalTarget(u64 eval_target) {
         // V13 latest log showed the target Pokémon species as a u16 at +0x70:

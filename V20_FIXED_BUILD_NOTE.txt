@@ -1,0 +1,5 @@
+V20 build fix
+
+This package fixes the GitHub Actions build failure from the first V20 package.
+Cause: one stray closing brace after IsKnownProbeSpecies() closed the AIBridge namespace too early, causing compile-time errors.
+Fix: removed the stray brace. No gameplay/scoring logic was intentionally changed.
