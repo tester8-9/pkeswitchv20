@@ -1,6 +1,6 @@
 #pragma once
 
-// SWSH AI Bridge V20 - generalized normalized VGC-ish switch scorer.
+// SWSH AI Bridge V22 - conservative generic matchup switch scorer.
 //
 // What V3 proved from the user's log:
 // - The hook at 0x7D4BDC is reached during Ian/062 trainer battle.
@@ -1177,13 +1177,13 @@ namespace AIBridge {
         if (!ShouldLog(hit)) return;
         const TrainerTeamDef* team = ResolveTrainerTeam(state_ptr);
         if (!team) {
-            Logging.Log("[ai_bridge] %s v21_team unresolved active=%u/%s fallback=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v23_team unresolved active=%u/%s fallback=%u/%s\n",
                 tag,
                 static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
                 static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)));
             return;
         }
-        Logging.Log("[ai_bridge] %s v21_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
+        Logging.Log("[ai_bridge] %s v23_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
             tag, static_cast<u32>(team->trainer_id),
             static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
             static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)),
@@ -2557,6 +2557,14 @@ namespace AIBridge {
         return false;
     }
 
+    static inline bool SummaryHasMove(u32 move_id) {
+        for (u32 i = 0; i < move_record_count; i++) {
+            const MoveScoreRecord& r = move_records[i];
+            if (r.move_id == move_id) return true;
+        }
+        return false;
+    }
+
     static inline bool SummaryHasPositiveMove(u32 move_id) {
         for (u32 i = 0; i < move_record_count; i++) {
             const MoveScoreRecord& r = move_records[i];
@@ -2600,6 +2608,128 @@ namespace AIBridge {
         return false;
     }
 
+    // ---------------------------------------------------------------------
+    // V23: Gen-IV-inspired + VGC-ish switch scoring
+    // ---------------------------------------------------------------------
+    // This version intentionally makes a larger design step:
+    // - Use Gen IV's documented send-in concepts as scoring features:
+    //   type-effectiveness sort, super-effective switch-in pressure,
+    //   fallback/most-damage approximation.
+    // - Use Pokemon Showdown's request-structure idea only as a safety model:
+    //   legal switch candidates are taken from the engine's candidate table;
+    //   the bridge does not invent illegal switch actions.
+    // - Keep VGC-specific heuristics: Fake Out tempo, Wide Guard value,
+    //   Cinderace/Libero move-threat profiles, Fairy-board Lucario tuning,
+    //   priority-KO opportunity checks, and low-HP/future-value approximations.
+
+    static inline s32 GenIVEffectivenessScore10(u32 eff10) {
+        // Gen IV send-in phase scores one attacking type against a target:
+        // 4x=160, 2x=80, 1x=40, 1/2x=20, 1/4x=10, 0x=0.
+        if (eff10 >= 40) return 160;
+        if (eff10 >= 20) return 80;
+        if (eff10 >= 10) return 40;
+        if (eff10 >= 5) return 20;
+        if (eff10 > 0) return 10;
+        return 0;
+    }
+
+    static inline s32 GenIVTypePairOffenseScore(u16 attacker_species, SpeciesTypeInfo defender) {
+        const SpeciesTypeInfo atk = SpeciesTypes(attacker_species);
+        if (!HasSpeciesTypes(atk) || !HasSpeciesTypes(defender)) return 40;
+        const s32 s1 = GenIVEffectivenessScore10(TypeEffectiveness10(atk.t1, defender));
+        const u8 second_type = atk.t2 == BT_NONE ? atk.t1 : atk.t2;
+        const s32 s2 = GenIVEffectivenessScore10(TypeEffectiveness10(second_type, defender));
+        return s1 + s2;
+    }
+
+    static inline bool MoveIsPriorityLike(u32 move_id) {
+        switch (move_id) {
+            case 98:  // Quick Attack
+            case 183: // Mach Punch
+            case 245: // Extreme Speed
+            case 252: // Fake Out
+            case 389: // Sucker Punch
+            case 418: // Bullet Punch
+            case 420: // Ice Shard
+            case 425: // Shadow Sneak
+            case 453: // Aqua Jet
+            case 803: // Grassy Glide
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static inline bool MoveIsImmediateTempo(u32 move_id) {
+        switch (move_id) {
+            case 252: // Fake Out
+            case 469: // Wide Guard
+            case 366: // Tailwind
+            case 433: // Trick Room
+            case 476: // Rage Powder
+            case 266: // Follow Me
+            case 270: // Helping Hand
+            case 575: // Parting Shot
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static inline s32 BestMoveScoreAgainstSpecies(u16 target_species) {
+        s32 best = -999999;
+        bool found = false;
+        for (u32 i = 0; i < move_record_count; i++) {
+            const MoveScoreRecord& r = move_records[i];
+            if (target_species != 0 && r.target_species != target_species) continue;
+            if (r.score_sum > best) best = r.score_sum;
+            found = true;
+        }
+        return found ? best : -999999;
+    }
+
+    static inline bool SummaryHasPositivePriorityInto(u16 target_species) {
+        for (u32 i = 0; i < move_record_count; i++) {
+            const MoveScoreRecord& r = move_records[i];
+            if (!MoveIsPriorityLike(r.move_id)) continue;
+            if (target_species != 0 && r.target_species != target_species) continue;
+            if (r.score_sum > 0) return true;
+        }
+        return false;
+    }
+
+    static inline bool SummaryHasPositiveTempoMove() {
+        for (u32 i = 0; i < move_record_count; i++) {
+            const MoveScoreRecord& r = move_records[i];
+            if (MoveIsImmediateTempo(r.move_id) && r.score_sum > 0) return true;
+        }
+        return false;
+    }
+
+    static inline bool SummaryHasMoveId(u32 move_id) {
+        for (u32 i = 0; i < move_record_count; i++) if (move_records[i].move_id == move_id) return true;
+        return false;
+    }
+
+    static inline bool VisibleBoardHasSpreadOrFairyPressure() {
+        return VisibleThreatIncludes(869) || VisibleThreatIncludes(861) || VisibleThreatIncludes(858) || VisibleThreatIncludes(468);
+    }
+
+    static inline s32 FutureRoleValue(u16 species) {
+        switch (species) {
+            case 620: return 34; // Mienshao: Fake Out / Wide Guard / fast pressure.
+            case 475: return 24; // Gallade: Trick Room / Wide Guard.
+            case 534: return 14; // Conkeldurr: bulky attacker / priority variants.
+            case 448: return 20; // Lucario: Steel/Fighting pressure, but fragile into Fire/Ground.
+            case 675: return 10; // Pangoro: Parting Shot utility, but awful into Fairy.
+            case 823: return 24; // Corviknight: Tailwind/Roost role.
+            case 547: return 26; // Whimsicott: Tailwind support.
+            case 876: return 26; // Indeedee: redirection/terrain.
+            case 591: return 30; // Amoonguss: Rage Powder/Spore.
+            default: return 0;
+        }
+    }
+
     static inline s32 ScoreSwitchMatchupV20(u64 state_ptr, u16 active_species, u16 switch_species, const char* tag, u32 hit) {
         const SpeciesTypeInfo active_types = SpeciesTypes(active_species);
         const SpeciesTypeInfo switch_types = SpeciesTypes(switch_species);
@@ -2608,18 +2738,25 @@ namespace AIBridge {
 
         if (!HasSpeciesTypes(switch_types) || !HasSpeciesTypes(active_types)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v21_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v23_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
         }
 
-        // Strong VGC tempo rule: do not pivot away from a live Fake Out lead if
-        // the game scores Fake Out positively.  This prevents turn-1 Mienshao
-        // from wasting immediate tempo by switching.
+        // Fake Out is immediate tempo, not just future value.  Do not pivot a
+        // lead Fake Out mon before it has had a chance to use that pressure,
+        // unless a future build detects catastrophic danger/low HP directly.
+        if (active_species == 620 && SummaryHasMove(252) && AIBridge::policy_forced_total == 0) {
+            if (ShouldLog(hit)) {
+                Logging.Log("[ai_bridge] %s v23_score blocked: first_fakeout_window active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                    tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
+            }
+            return -9999;
+        }
         if (active_species == 620 && SummaryHasPositiveMove(252)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v21_score blocked: active_fakeout_tempo active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v23_score blocked: fakeout_positive active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -2633,15 +2770,22 @@ namespace AIBridge {
         u32 worse_defense_count = 0;
         u32 active_danger_hits = 0;
         u32 offensive_hits = 0;
+        u32 gen4_super_hits = 0;
+        u32 priority_better_than_switch = 0;
 
-        // Move opportunity cost. Softer than v19: a good move discourages a
-        // switch, but a truly safer pivot can still beat a neutral/weak move.
-        if (best_move >= 8) score -= 70;
-        else if (best_move >= 6) score -= 52;
-        else if (best_move >= 3) score -= 30;
-        else if (best_move >= 1) score -= 12;
-        else if (best_move <= -4) score += 38;
-        else score += 12;
+        // Opportunity cost from the game's own move scoring.  This is a
+        // softer version than previous builds: positive moves matter, but
+        // a clearly superior switch-in can still win if the board demands it.
+        if (best_move >= 8) score -= 85;
+        else if (best_move >= 6) score -= 62;
+        else if (best_move >= 3) score -= 38;
+        else if (best_move >= 1) score -= 18;
+        else if (best_move == 0) score += 10;
+        else if (best_move <= -4) score += 42;
+        else score += 20;
+
+        if (SummaryHasPositiveTempoMove()) score -= 14;
+        if (SummaryHasMoveId(469) && VisibleBoardHasSpreadOrFairyPressure()) score -= 10; // Wide Guard value, not a hard block.
 
         u16 visible_threats[4] = {0, 0, 0, 0};
         threat_count = CollectVisibleThreatSpecies(state_ptr, active_species, switch_species, visible_threats);
@@ -2655,71 +2799,104 @@ namespace AIBridge {
             const u32 target_vs_active = MaxThreatMoveEffectiveness10(target_species, active_types);
             const u32 target_vs_switch = MaxThreatMoveEffectiveness10(target_species, switch_types);
             const u32 switch_vs_target = MaxSwitchOffenseEffectiveness10(switch_species, target_types);
+            const s32 gen4_type_score = GenIVTypePairOffenseScore(switch_species, target_types);
+            const s32 target_best_move = BestMoveScoreAgainstSpecies(target_species);
 
-            // Active danger: switching makes sense if current active is threatened.
-            if (target_vs_active >= 40) { score += 55; active_danger_hits += 2; }
-            else if (target_vs_active >= 20) { score += 32; active_danger_hits++; }
+            // Active danger: more likely to switch when current active is under real threat.
+            if (target_vs_active >= 40) { score += 62; active_danger_hits += 2; }
+            else if (target_vs_active >= 20) { score += 36; active_danger_hits++; }
             else if (target_vs_active <= 5) { score -= 10; }
 
-            // Switch-in defensive fit: penalize bad pivots, reward real resist/immunity.
-            if (target_vs_switch >= 40) { score -= 85; switchin_bad_hits += 2; worse_defense_count += 2; }
-            else if (target_vs_switch >= 20) { score -= 42; switchin_bad_hits++; worse_defense_count++; }
-            else if (target_vs_switch == 0) { score += 48; better_defense_count += 2; }
-            else if (target_vs_switch <= 5) { score += 30; better_defense_count++; }
+            // Switch-in defensive fit: heavily punish unsafe pivots, but judge
+            // relative improvement too.  A neutral switch can still be good if
+            // the current active is weak and the switch-in threatens back.
+            if (target_vs_switch >= 40) { score -= 92; switchin_bad_hits += 2; worse_defense_count += 2; }
+            else if (target_vs_switch >= 20) { score -= 46; switchin_bad_hits++; worse_defense_count++; }
+            else if (target_vs_switch == 0) { score += 56; better_defense_count += 2; }
+            else if (target_vs_switch <= 5) { score += 34; better_defense_count++; }
+            else score += 4;
 
-            // Relative improvement is the key V20 generalization.  Reward the
-            // switch only if the switch-in is actually safer than the active.
-            if (target_vs_switch < target_vs_active) score += 32;
-            else if (target_vs_switch > target_vs_active) score -= 24;
+            if (target_vs_switch < target_vs_active) score += (target_vs_active >= 20 ? 42 : 26);
+            else if (target_vs_switch > target_vs_active) score -= 30;
 
-            // Offensive pressure from the switch-in.
-            if (switch_vs_target >= 40) { score += 38; offensive_hits += 2; }
-            else if (switch_vs_target >= 20) { score += 24; offensive_hits++; }
-            else if (switch_vs_target == 0) score -= 18;
-            else if (switch_vs_target <= 5) score -= 6;
+            // Gen-IV-inspired send-in offense.  This intentionally uses a
+            // type-effectiveness score in the style of the uploaded Gen IV
+            // switching notes, then folds it into the modern doubles board.
+            if (gen4_type_score >= 160) { score += 38; gen4_super_hits++; }
+            else if (gen4_type_score >= 120) { score += 28; gen4_super_hits++; }
+            else if (gen4_type_score >= 80) score += 16;
+            else if (gen4_type_score <= 20) score -= 10;
+
+            if (switch_vs_target >= 40) { score += 46; offensive_hits += 2; }
+            else if (switch_vs_target >= 20) { score += 30; offensive_hits++; }
+            else if (switch_vs_target == 0) score -= 22;
+            else if (switch_vs_target <= 5) score -= 8;
+
+            // If the current active already has positive priority pressure into
+            // this target, don't pivot just to answer the same low-HP/fairy target.
+            // This is the requested "Alcremie is low and priority can KO" style gate.
+            if (target_best_move > 0 && SummaryHasPositivePriorityInto(target_species)) {
+                score -= 45;
+                priority_better_than_switch++;
+            }
         }
 
         const bool sees_cinderace = VisibleThreatIncludes(815);
         const bool sees_grimmsnarl = VisibleThreatIncludes(861);
         const bool sees_alcremie = VisibleThreatIncludes(869);
-        const bool sees_fairy = sees_grimmsnarl || sees_alcremie;
+        const bool sees_hatterene = VisibleThreatIncludes(858);
+        const bool sees_togekiss = VisibleThreatIncludes(468);
+        const bool sees_fairy = sees_grimmsnarl || sees_alcremie || sees_hatterene || sees_togekiss;
 
-        // Broad role/future-value rules.  These remain generic where possible;
-        // species-specific lines are safety rails for important known patterns.
-        if (active_species == 620) score -= 12;             // Mienshao often has tempo value.
-        if (switch_species == 620) score += 18;             // Fake Out cycling can be strong later.
-        if (switch_species == 534) score += 14;             // Conkeldurr is a sturdier pivot.
-        if (switch_species == 448) score -= 6;              // Lucario is powerful but risky.
-        if (switch_species == 675 && sees_fairy) score -= 120; // Pangoro into Fairy is awful.
-        if (switch_species == 475 && sees_fairy) score -= 55;  // Gallade dislikes Fairy boards.
-        // V21: Lucario should not be globally suppressed by Cinderace when a
-        // Fairy threat is also visible.  It is still unsafe into Fire pressure,
-        // but Steel STAB into Fairy can justify switching ONE Fighting-type out.
-        if (switch_species == 448 && sees_alcremie) score += 110; // Steel pressure into Alcremie.
-        else if (switch_species == 448 && sees_grimmsnarl) score += 65; // Steel/Fighting pressure into Fairy/Dark.
-        if (switch_species == 448 && sees_cinderace && sees_fairy) score -= 35; // mixed board: Fire danger, but Fairy payoff.
-        else if (switch_species == 448 && sees_cinderace) score -= 85; // pure Cinderace board still punishes Lucario.
-        if (switch_species == 534 && sees_cinderace) score += 12; // Conkeldurr may be safer than Lucario, but not automatic.
+        // Future-value and sacrifice/preserve approximation.  We cannot yet
+        // read exact HP safely, so use move-score context: if the active has
+        // no good move and is threatened, preservation becomes more valuable;
+        // if it has a good move/tempo, staying in is preferred.
+        const s32 future_value = FutureRoleValue(active_species);
+        if (future_value > 0 && best_move <= 0 && active_danger_hits > 0) score += future_value;
+        if (future_value > 0 && best_move >= 3) score -= (future_value / 2);
 
-        // Quality gates and anti-spam controls.
-        if (known_threat_count == 0) score -= 90;
-        if (threat_count == 0) score -= 35;
-        if (switchin_bad_hits >= 2 && better_defense_count == 0) score -= 45;
-        if (switchin_bad_hits >= 1 && offensive_hits == 0) score -= 18;
-        if (better_defense_count >= 2) score += 32;
-        if (offensive_hits >= 2) score += 24;
-        if (active_danger_hits >= 1 && best_move <= 1) score += 30;
-        if (active_danger_hits >= 2) score += 25;
-        if (best_move >= 2 && active_danger_hits == 0) score -= 25;
-        if (known_threat_count == 1 && better_defense_count >= 1 && offensive_hits >= 1 && switchin_bad_hits == 0) score += 28;
+        // Species-specific safety rails and VGC board judgement.
+        if (active_species == 620) score -= 8;              // Mienshao often has tempo value.
+        if (switch_species == 620) score += 16;             // Fake Out cycling.
+        if (switch_species == 534) score += 12;             // Conkeldurr bulky pivot.
+        if (switch_species == 448) score -= 4;              // Lucario has payoff but can be fragile.
+        if (switch_species == 675 && sees_fairy) score -= 160;
+        if (switch_species == 475 && sees_fairy) score -= 70;
+        if (switch_species == 534 && sees_fairy) score -= 45;
+        if (switch_species == 620 && sees_fairy) score -= 36;
+
+        // Lucario/Fairy/Fire tuning.  Alcremie is a much clearer Lucario target
+        // than Grimmsnarl.  Cinderace remains a major counter-pressure, but a
+        // mixed Alcremie board can still justify Lucario if the score is otherwise high.
+        if (switch_species == 448 && sees_alcremie && !sees_cinderace) score += 150;
+        else if (switch_species == 448 && sees_alcremie && sees_cinderace) score += 50;
+        else if (switch_species == 448 && sees_grimmsnarl && !sees_cinderace) score += 38;
+        else if (switch_species == 448 && sees_grimmsnarl && sees_cinderace) score -= 58;
+        if (switch_species == 448 && sees_cinderace && !sees_alcremie) score -= 125;
+        if (switch_species == 448 && sees_cinderace && best_move >= 0) score -= 25;
+
+        // Board-level quality gates.
+        if (known_threat_count == 0) score -= 110;
+        if (threat_count == 0) score -= 45;
+        if (switchin_bad_hits >= 2 && better_defense_count == 0) score -= 55;
+        if (switchin_bad_hits >= 1 && offensive_hits == 0 && gen4_super_hits == 0) score -= 26;
+        if (better_defense_count >= 2) score += 36;
+        if (offensive_hits >= 2) score += 30;
+        if (gen4_super_hits >= 2) score += 20;
+        if (active_danger_hits >= 1 && best_move <= 1) score += 34;
+        if (active_danger_hits >= 2) score += 28;
+        if (best_move >= 2 && active_danger_hits == 0) score -= 30;
+        if (known_threat_count == 1 && better_defense_count >= 1 && (offensive_hits >= 1 || gen4_super_hits >= 1) && switchin_bad_hits == 0) score += 30;
 
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v21_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u active_danger=%u offense=%u cinderace=%u alcremie=%u fairy=%u\n",
+            Logging.Log("[ai_bridge] %s v23_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u worse=%u active_danger=%u offense=%u gen4=%u priority=%u cinderace=%u grimmsnarl=%u alcremie=%u fairy=%u future=%d\n",
                 tag,
                 static_cast<u32>(active_species), KnownSpeciesName(active_species), TypeName(active_types.t1), TypeName(active_types.t2),
                 static_cast<u32>(switch_species), KnownSpeciesName(switch_species), TypeName(switch_types.t1), TypeName(switch_types.t2),
-                score, best_move, worst_move, threat_count, known_threat_count, switchin_bad_hits, better_defense_count, active_danger_hits, offensive_hits,
-                sees_cinderace ? 1 : 0, sees_alcremie ? 1 : 0, sees_fairy ? 1 : 0);
+                score, best_move, worst_move, threat_count, known_threat_count, switchin_bad_hits, better_defense_count, worse_defense_count,
+                active_danger_hits, offensive_hits, gen4_super_hits, priority_better_than_switch,
+                sees_cinderace ? 1 : 0, sees_grimmsnarl ? 1 : 0, sees_alcremie ? 1 : 0, sees_fairy ? 1 : 0, future_value);
         }
         return score;
     }
@@ -2729,15 +2906,15 @@ namespace AIBridge {
         const u16 active_species = CandidateActiveSpecies(state_ptr);
         LogResolvedTeam(tag, state_ptr, hit);
         const s32 matchup_score = ScoreSwitchMatchupV20(state_ptr, active_species, switch_in_species, tag, hit);
-        if (matchup_score < 20) {
+        if (matchup_score < 40) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v21_gate blocked score=%d threshold=20 active=%u/%s switchin=%u/%s\n",
+                Logging.Log("[ai_bridge] %s v23_gate blocked score=%d threshold=40 active=%u/%s switchin=%u/%s\n",
                     tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
             }
             return false;
         }
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v21_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v23_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
                 tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
         }
         return true;
@@ -3045,7 +3222,7 @@ namespace AIBridge {
             : global_config.ai_bridge.switch_max_candidates_per_hit;
         u32 changed = 0;
 
-        // V21: mode 7 is now best-row selection, not first-row selection.
+        // V22: mode 7 is now best-row selection, not first-row selection.
         // V20 could allow action 2/Conkeldurr simply because it was the first
         // passing candidate, even if action 3/Lucario was the better strategic
         // answer to a Fairy board.  Score all matching rows, choose the best one,
@@ -3076,9 +3253,9 @@ namespace AIBridge {
                 }
             }
 
-            if (best_index == 0xFFFFFFFF || best_score < 20) {
+            if (best_index == 0xFFFFFFFF || best_score < 40) {
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s v21_gate blocked_best best_score=%d threshold=20 action=%u\n", tag, best_score, best_action);
+                    Logging.Log("[ai_bridge] %s v23_gate blocked_best best_score=%d threshold=40 action=%u\n", tag, best_score, best_action);
                 }
                 return;
             }
@@ -3103,10 +3280,10 @@ namespace AIBridge {
                     }
                 }
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s switch_policy_v21 best_row changed=%u total=%u action=%u best_score=%d target_score=%u matching=%u native_only=%u\n",
+                    Logging.Log("[ai_bridge] %s switch_policy_v23 best_row changed=%u total=%u action=%u best_score=%d target_score=%u matching=%u native_only=%u\n",
                         tag, changed, AIBridge::policy_forced_total, best_action, best_score, target_score, matching,
                         global_config.ai_bridge.switch_native_score_only ? 1 : 0);
-                    DumpCandidateTable("candidate_score_after_switch_policy_v21", state_ptr, hit);
+                    DumpCandidateTable("candidate_score_after_switch_policy_v23", state_ptr, hit);
                 }
             }
             return;
