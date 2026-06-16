@@ -714,8 +714,37 @@ namespace AIBridge {
         return *reinterpret_cast<volatile u32*>(out + 0xA4);
     }
 
+
+    static inline bool MoveSummaryAlreadyHasSpecies(u16 species) {
+        if (species == 0) return true;
+        for (u32 i = 0; i < move_record_count; i++) {
+            if (move_records[i].target_species == species) return true;
+        }
+        return false;
+    }
+
+    static inline bool ShouldStartNewBoardWindowForSpecies(u16 species) {
+        if (species == 0) return false;
+        // Do not clear during the early move-eval setup; wait until a meaningful
+        // board window exists.  This catches replacement targets such as
+        // Cinderace -> Alcremie without nuking the initial Cinderace/Grimmsnarl
+        // setup as it is being built.
+        if (move_record_count < 8) return false;
+        if (MoveSummaryAlreadyHasSpecies(species)) return false;
+        return true;
+    }
+
     static inline void RecordMoveScore(u32 move_id, u32 target_key, u16 target_species, s32 score_delta) {
         if (move_id == 0 || move_id > 2000) return;
+
+        // V27: if a new visible target appears after a full board window was
+        // already built, treat it as a replacement/board change and reset the
+        // stale window before recording the new target.  This fixes Cinderace
+        // remaining in the threat set after it was KO'd and Alcremie came in.
+        if (ShouldStartNewBoardWindowForSpecies(target_species)) {
+            ClearMoveScoreRecords();
+        }
+
         const u32 seq = ++AIBridge::move_record_seq;
 
         for (u32 i = 0; i < move_record_count; i++) {
@@ -766,10 +795,11 @@ namespace AIBridge {
     static inline bool IsFreshMoveRecord(const MoveScoreRecord& r) {
         const u32 newest = NewestMoveRecordSeq();
         if (newest == 0 || r.last_seen_seq == 0) return true;
-        // Keep only the newest board slice.  This is intentionally small because
-        // replacement turns can leave stale Cinderace records in the summary after
-        // Alcremie/another replacement appears.
-        return (r.last_seen_seq + 18) >= newest;
+        // Keep only the newest board slice.  V26's 18-record window still let
+        // stale Cinderace records survive after Cinderace was KO'd/replaced by
+        // Alcremie.  A tighter window keeps enough recent target context while
+        // dropping old replacement-target records sooner.
+        return (r.last_seen_seq + 8) >= newest;
     }
 
     static inline s32 BestMoveSummaryScore() {
@@ -1213,13 +1243,13 @@ namespace AIBridge {
         if (!ShouldLog(hit)) return;
         const TrainerTeamDef* team = ResolveTrainerTeam(state_ptr);
         if (!team) {
-            Logging.Log("[ai_bridge] %s v26_team unresolved active=%u/%s fallback=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v27_team unresolved active=%u/%s fallback=%u/%s\n",
                 tag,
                 static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
                 static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)));
             return;
         }
-        Logging.Log("[ai_bridge] %s v26_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
+        Logging.Log("[ai_bridge] %s v27_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
             tag, static_cast<u32>(team->trainer_id),
             static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
             static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)),
@@ -2654,7 +2684,7 @@ namespace AIBridge {
     }
 
     // ---------------------------------------------------------------------
-    // V26: Gen-IV-inspired + fresh-board active-owned role switch scoring
+    // V27: replacement-window reset + high-confidence switch commit scoring
     // ---------------------------------------------------------------------
     // This version intentionally makes a larger design step:
     // - Use Gen IV's documented send-in concepts as scoring features:
@@ -2840,7 +2870,7 @@ namespace AIBridge {
 
         if (!HasSpeciesTypes(switch_types) || !HasSpeciesTypes(active_types)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v26_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v27_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -2853,14 +2883,14 @@ namespace AIBridge {
         if (active_species == 620 && SummaryHasMove(252) && !AIBridge::opening_fakeout_guard_consumed) {
             AIBridge::opening_fakeout_guard_consumed = true;
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v26_score blocked: opening_fakeout_once active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v27_score blocked: opening_fakeout_once active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
         }
         if (active_species == 620 && SummaryHasPositiveMove(252)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v26_score delayed: active_positive_fakeout active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v27_score delayed: active_positive_fakeout active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -2891,7 +2921,7 @@ namespace AIBridge {
         if (ActiveOwnedSetupOrPriorityDelay(active_species)) {
             score -= 42;
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v26_score delayed: active_owned_setup_or_priority active=%u/%s switchin=%u/%s\n",
+                Logging.Log("[ai_bridge] %s v27_score delayed: active_owned_setup_or_priority active=%u/%s switchin=%u/%s\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species));
             }
         }
@@ -2999,7 +3029,7 @@ namespace AIBridge {
         if (known_threat_count == 1 && better_defense_count >= 1 && (offensive_hits >= 1 || gen4_super_hits >= 1) && switchin_bad_hits == 0) score += 30;
 
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v26_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u worse=%u active_danger=%u offense=%u gen4=%u priority=%u cinderace=%u grimmsnarl=%u alcremie=%u fairy=%u future=%d\n",
+            Logging.Log("[ai_bridge] %s v27_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u worse=%u active_danger=%u offense=%u gen4=%u priority=%u cinderace=%u grimmsnarl=%u alcremie=%u fairy=%u future=%d\n",
                 tag,
                 static_cast<u32>(active_species), KnownSpeciesName(active_species), TypeName(active_types.t1), TypeName(active_types.t2),
                 static_cast<u32>(switch_species), KnownSpeciesName(switch_species), TypeName(switch_types.t1), TypeName(switch_types.t2),
@@ -3017,13 +3047,13 @@ namespace AIBridge {
         const s32 matchup_score = ScoreSwitchMatchupV20(state_ptr, active_species, switch_in_species, tag, hit);
         if (matchup_score < 40) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v26_gate blocked score=%d threshold=40 active=%u/%s switchin=%u/%s\n",
+                Logging.Log("[ai_bridge] %s v27_gate blocked score=%d threshold=40 active=%u/%s switchin=%u/%s\n",
                     tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
             }
             return false;
         }
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v26_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v27_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
                 tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
         }
         return true;
@@ -3230,10 +3260,15 @@ namespace AIBridge {
         // This avoids the old v5/v6 1,000,000 spam while letting obvious
         // Fairy-board -> Lucario pivots actually commit.
         u32 target = TargetScoreForAction(action_id);
-        if (matchup_score >= 360 && target < 170) target = 170;
-        else if (matchup_score >= 280 && target < 155) target = 155;
-        else if (matchup_score >= 200 && target < 140) target = 140;
-        else if (matchup_score >= 120 && target < 128) target = 128;
+        // V27: if the scorer is highly confident, commit hard.  The log showed
+        // v26 correctly chose Lucario at +203 but score 140 did not reliably
+        // translate into an actual switch.  This still is not spam: only the
+        // single best approved row receives a large score.
+        if (matchup_score >= 360) target = 1000000;
+        else if (matchup_score >= 200) target = 1000000;
+        else if (matchup_score >= 120 && target < 300) target = 300;
+        else if (matchup_score >= 80 && target < 180) target = 180;
+        else if (matchup_score >= 40 && target < 128) target = 128;
         return target;
     }
 
@@ -3378,8 +3413,9 @@ namespace AIBridge {
 
             if (best_index == 0xFFFFFFFF || best_score < 40) {
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s v26_gate blocked_best best_score=%d threshold=40 action=%u\n", tag, best_score, best_action);
+                    Logging.Log("[ai_bridge] %s v27_gate blocked_best best_score=%d threshold=40 action=%u\n", tag, best_score, best_action);
                 }
+                move_records_consumed = true;
                 return;
             }
 
@@ -3403,12 +3439,13 @@ namespace AIBridge {
                     }
                 }
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s switch_policy_v26 best_row changed=%u total=%u action=%u best_score=%d dynamic_target=%u matching=%u native_only=%u\n",
+                    Logging.Log("[ai_bridge] %s switch_policy_v27 best_row changed=%u total=%u action=%u best_score=%d dynamic_target=%u matching=%u native_only=%u\n",
                         tag, changed, AIBridge::policy_forced_total, best_action, best_score, target_score, matching,
                         global_config.ai_bridge.switch_native_score_only ? 1 : 0);
-                    DumpCandidateTable("candidate_score_after_switch_policy_v26", state_ptr, hit);
+                    DumpCandidateTable("candidate_score_after_switch_policy_v27", state_ptr, hit);
                 }
             }
+            move_records_consumed = true;
             return;
         }
 
