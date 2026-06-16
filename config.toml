@@ -104,7 +104,7 @@ final_selection_post_offset = 9342816
 hook_output_readback_post = true
 hook_candidate_list_post = false
 hook_candidate_score_post = true
-hook_final_selection_post = false
+hook_final_selection_post = true
 
 log_hits = true
 max_log_hits = 160
