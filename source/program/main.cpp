@@ -50,6 +50,7 @@ HOOK_DEFINE_TRAMPOLINE(MainInitHook){
             EXL_ABORT("Invalid config.");
         }
         global_config.from_table(config);
+        install_ai_bridge_patch();
         Orig(x0, x1, x2, x3);
     }
 };
@@ -73,7 +74,6 @@ extern "C" void exl_main(void* x0, void* x1) {
     install_extended_following_patch();
     install_fishing_tweaks_patch();
     install_dex_animations_patch();
-    install_ai_bridge_patch();
     #ifdef DEBUG
     install_debug_patch();
     #endif

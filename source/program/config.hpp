@@ -66,7 +66,6 @@ struct PatchConfig {
         bool active;
     } dex_animations;
 
-
     struct {
         bool active;
         bool install_candidate_hooks;
@@ -122,6 +121,10 @@ struct PatchConfig {
         bool score_survey_dump_readback_x0;
         bool score_survey_dump_readback_out;
         u32 score_survey_words;
+        bool action_probe_enabled;
+        u32 action_probe_action_id;
+        u32 action_probe_score;
+        u32 action_probe_max_uses;
     } ai_bridge;
 
     void from_table(toml::parse_result &table) {
@@ -171,12 +174,12 @@ struct PatchConfig {
         ai_bridge.candidate_list_post_offset = static_cast<u64>(table["ai_bridge"]["candidate_list_post_offset"].value_or(9342476ull));
         ai_bridge.candidate_score_post_offset = static_cast<u64>(table["ai_bridge"]["candidate_score_post_offset"].value_or(9342576ull));
         ai_bridge.final_selection_post_offset = static_cast<u64>(table["ai_bridge"]["final_selection_post_offset"].value_or(9342816ull));
-        ai_bridge.hook_output_readback_post = table["ai_bridge"]["hook_output_readback_post"].value_or(true);
+        ai_bridge.hook_output_readback_post = table["ai_bridge"]["hook_output_readback_post"].value_or(false);
         ai_bridge.hook_candidate_list_post = table["ai_bridge"]["hook_candidate_list_post"].value_or(false);
-        ai_bridge.hook_candidate_score_post = table["ai_bridge"]["hook_candidate_score_post"].value_or(true);
+        ai_bridge.hook_candidate_score_post = table["ai_bridge"]["hook_candidate_score_post"].value_or(false);
         ai_bridge.hook_final_selection_post = table["ai_bridge"]["hook_final_selection_post"].value_or(false);
-        ai_bridge.log_hits = table["ai_bridge"]["log_hits"].value_or(true);
-        ai_bridge.max_log_hits = table["ai_bridge"]["max_log_hits"].value_or(160);
+        ai_bridge.log_hits = table["ai_bridge"]["log_hits"].value_or(false);
+        ai_bridge.max_log_hits = table["ai_bridge"]["max_log_hits"].value_or(64);
         ai_bridge.candidate_dump_count = table["ai_bridge"]["candidate_dump_count"].value_or(8);
         ai_bridge.force_output_score = table["ai_bridge"]["force_output_score"].value_or(0);
         ai_bridge.force_pokechange_enable = table["ai_bridge"]["force_pokechange_enable"].value_or(-1);
@@ -189,36 +192,40 @@ struct PatchConfig {
         ai_bridge.force_candidate_score = table["ai_bridge"]["force_candidate_score"].value_or(1000000);
         ai_bridge.force_candidate_enable = table["ai_bridge"]["force_candidate_enable"].value_or(true);
         ai_bridge.force_existing_candidates = table["ai_bridge"]["force_existing_candidates"].value_or(false);
-        ai_bridge.force_existing_action_min = table["ai_bridge"]["force_existing_action_min"].value_or(2);
-        ai_bridge.force_existing_action_max = table["ai_bridge"]["force_existing_action_max"].value_or(5);
+        ai_bridge.force_existing_action_min = table["ai_bridge"]["force_existing_action_min"].value_or(0);
+        ai_bridge.force_existing_action_max = table["ai_bridge"]["force_existing_action_max"].value_or(255);
         ai_bridge.force_existing_score = table["ai_bridge"]["force_existing_score"].value_or(1000000);
         ai_bridge.force_existing_enable = table["ai_bridge"]["force_existing_enable"].value_or(true);
-        ai_bridge.switch_policy_mode = table["ai_bridge"]["switch_policy_mode"].value_or(7);
+        ai_bridge.switch_policy_mode = table["ai_bridge"]["switch_policy_mode"].value_or(0);
         ai_bridge.switch_min_hit = table["ai_bridge"]["switch_min_hit"].value_or(1);
-        ai_bridge.switch_score = table["ai_bridge"]["switch_score"].value_or(115);
-        ai_bridge.switch_max_forces_per_battle = table["ai_bridge"]["switch_max_forces_per_battle"].value_or(99);
-        ai_bridge.switch_max_forces_per_action = table["ai_bridge"]["switch_max_forces_per_action"].value_or(99);
+        ai_bridge.switch_score = table["ai_bridge"]["switch_score"].value_or(350);
+        ai_bridge.switch_max_forces_per_battle = table["ai_bridge"]["switch_max_forces_per_battle"].value_or(6);
+        ai_bridge.switch_max_forces_per_action = table["ai_bridge"]["switch_max_forces_per_action"].value_or(3);
         ai_bridge.switch_cooldown_hits = table["ai_bridge"]["switch_cooldown_hits"].value_or(0);
         ai_bridge.switch_action2_score = table["ai_bridge"]["switch_action2_score"].value_or(0);
         ai_bridge.switch_action3_score = table["ai_bridge"]["switch_action3_score"].value_or(0);
         ai_bridge.switch_max_candidates_per_hit = table["ai_bridge"]["switch_max_candidates_per_hit"].value_or(1);
         ai_bridge.switch_require_candidate_count = table["ai_bridge"]["switch_require_candidate_count"].value_or(2);
-        ai_bridge.switch_min_native_score = table["ai_bridge"]["switch_min_native_score"].value_or(100);
-        ai_bridge.switch_max_native_score = table["ai_bridge"]["switch_max_native_score"].value_or(100);
+        ai_bridge.switch_min_native_score = table["ai_bridge"]["switch_min_native_score"].value_or(0);
+        ai_bridge.switch_max_native_score = table["ai_bridge"]["switch_max_native_score"].value_or(150);
         ai_bridge.switch_preferred_action = table["ai_bridge"]["switch_preferred_action"].value_or(0);
         ai_bridge.switch_alternate_actions = table["ai_bridge"]["switch_alternate_actions"].value_or(true);
         ai_bridge.switch_native_score_only = table["ai_bridge"]["switch_native_score_only"].value_or(false);
-        ai_bridge.switch_disable_after_force = table["ai_bridge"]["switch_disable_after_force"].value_or(true);
-        ai_bridge.switch_gate_use_move_summary = table["ai_bridge"]["switch_gate_use_move_summary"].value_or(true);
-        ai_bridge.switch_gate_best_move_max = table["ai_bridge"]["switch_gate_best_move_max"].value_or(99);
-        ai_bridge.switch_gate_require_negative_record = table["ai_bridge"]["switch_gate_require_negative_record"].value_or(false);
+        ai_bridge.switch_disable_after_force = table["ai_bridge"]["switch_disable_after_force"].value_or(false);
+        ai_bridge.switch_gate_use_move_summary = table["ai_bridge"]["switch_gate_use_move_summary"].value_or(false);
+        ai_bridge.switch_gate_best_move_max = table["ai_bridge"]["switch_gate_best_move_max"].value_or(0);
+        ai_bridge.switch_gate_require_negative_record = table["ai_bridge"]["switch_gate_require_negative_record"].value_or(true);
         ai_bridge.switch_gate_negative_record_threshold = table["ai_bridge"]["switch_gate_negative_record_threshold"].value_or(-20);
-        ai_bridge.switch_gate_min_move_records = table["ai_bridge"]["switch_gate_min_move_records"].value_or(12);
-        ai_bridge.score_survey_mode = table["ai_bridge"]["score_survey_mode"].value_or(true);
+        ai_bridge.switch_gate_min_move_records = table["ai_bridge"]["switch_gate_min_move_records"].value_or(4);
+        ai_bridge.score_survey_mode = table["ai_bridge"]["score_survey_mode"].value_or(false);
         ai_bridge.score_survey_dump_state = table["ai_bridge"]["score_survey_dump_state"].value_or(false);
         ai_bridge.score_survey_dump_readback_x0 = table["ai_bridge"]["score_survey_dump_readback_x0"].value_or(false);
         ai_bridge.score_survey_dump_readback_out = table["ai_bridge"]["score_survey_dump_readback_out"].value_or(false);
         ai_bridge.score_survey_words = table["ai_bridge"]["score_survey_words"].value_or(32);
+        ai_bridge.action_probe_enabled = table["ai_bridge"]["action_probe_enabled"].value_or(false);
+        ai_bridge.action_probe_action_id = table["ai_bridge"]["action_probe_action_id"].value_or(2);
+        ai_bridge.action_probe_score = table["ai_bridge"]["action_probe_score"].value_or(1000000);
+        ai_bridge.action_probe_max_uses = table["ai_bridge"]["action_probe_max_uses"].value_or(1);
 
         initialized = true;
     }
