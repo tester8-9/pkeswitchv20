@@ -3016,12 +3016,19 @@ namespace AIBridge {
             }
         }
 
+        u8 visible_threat_types[12] = {BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE};
+        const u32 visible_threat_type_count = CollectVisibleThreatTypes(visible_threats, threat_count, visible_threat_types);
+
         const bool sees_cinderace = ThreatArrayIncludes(visible_threats, threat_count, 815);
         const bool sees_grimmsnarl = ThreatArrayIncludes(visible_threats, threat_count, 861);
         const bool sees_alcremie = ThreatArrayIncludes(visible_threats, threat_count, 869);
         const bool sees_hatterene = ThreatArrayIncludes(visible_threats, threat_count, 858);
         const bool sees_togekiss = ThreatArrayIncludes(visible_threats, threat_count, 468);
-        const bool sees_fairy = sees_grimmsnarl || sees_alcremie || sees_hatterene || sees_togekiss;
+        const bool sees_fairy = sees_grimmsnarl || sees_alcremie || sees_hatterene || sees_togekiss || TypeArrayIncludes(visible_threat_types, visible_threat_type_count, BT_FAIRY);
+        const bool sees_fire = TypeArrayIncludes(visible_threat_types, visible_threat_type_count, BT_FIRE);
+        const bool sees_ground = TypeArrayIncludes(visible_threat_types, visible_threat_type_count, BT_GROUND);
+        const bool sees_psychic = TypeArrayIncludes(visible_threat_types, visible_threat_type_count, BT_PSYCHIC);
+        const bool sees_flying = TypeArrayIncludes(visible_threat_types, visible_threat_type_count, BT_FLYING);
 
         // Generic type-board heuristics, not species-specific. These reward a
         // switch-in for solving the visible board by typing and pressure. This
@@ -3050,9 +3057,6 @@ namespace AIBridge {
         // too hard on named examples (Cinderace/Grimmsnarl/Lucario).  Keep the
         // known move profiles, but reward/punish by type relationship so this
         // applies to later trainers and different player teams.
-        u8 visible_threat_types[12] = {BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE, BT_NONE};
-        const u32 visible_threat_type_count = CollectVisibleThreatTypes(visible_threats, threat_count, visible_threat_types);
-
         const bool active_is_fightingish = SpeciesHasBattleType(active_species, BT_FIGHTING);
         const bool switch_is_steel = SpeciesHasBattleType(switch_species, BT_STEEL);
         const bool switch_is_poison = SpeciesHasBattleType(switch_species, BT_POISON);
