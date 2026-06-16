@@ -1,6 +1,6 @@
 #pragma once
 
-// SWSH AI Bridge V29 - generalized type/move switch scorer.
+// SWSH AI Bridge V30 - generalized type/move switch scorer.
 //
 // What V3 proved from the user's log:
 // - The hook at 0x7D4BDC is reached during Ian/062 trainer battle.
@@ -103,7 +103,7 @@ namespace AIBridge {
 
 
     static inline bool LooksLikePtr(u64 ptr) {
-        // V29: avoid treating packed constants like 0x0000002100000000 as
+        // V30: avoid treating packed constants like 0x0000002100000000 as
         // readable heap pointers.  The battle objects we validated in logs
         // live in the 0x218.../0x219.../0x21b... region; loose scanning of
         // lower 0x21000000xx values caused harmless but noisy Yuzu unmapped
@@ -593,7 +593,7 @@ namespace AIBridge {
     }
 
     static inline void ScanKnownSpecies(const char* tag, u64 ptr, u32 hit, u32 bytes_to_scan) {
-        // V29: species probing is now deep-debug only.  Normal gameplay logs
+        // V30: species probing is now deep-debug only.  Normal gameplay logs
         // already use fixed species offsets and do not need blind scanning.
         if (!global_config.ai_bridge.score_survey_mode) return;
         if (!global_config.ai_bridge.score_survey_dump_state) return;
@@ -1213,13 +1213,13 @@ namespace AIBridge {
         if (!ShouldLog(hit)) return;
         const TrainerTeamDef* team = ResolveTrainerTeam(state_ptr);
         if (!team) {
-            Logging.Log("[ai_bridge] %s v29_team unresolved active=%u/%s fallback=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v30_team unresolved active=%u/%s fallback=%u/%s\n",
                 tag,
                 static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
                 static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)));
             return;
         }
-        Logging.Log("[ai_bridge] %s v29_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
+        Logging.Log("[ai_bridge] %s v30_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
             tag, static_cast<u32>(team->trainer_id),
             static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
             static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)),
@@ -2685,7 +2685,7 @@ namespace AIBridge {
     }
 
     static inline u32 CollectVisibleThreatSpecies(u64 state_ptr, u16 active_species, u16 switch_species, u16* out) {
-        // V29: Build the current board from the newest opponent target species,
+        // V30: Build the current board from the newest opponent target species,
         // not every fresh move record.  Replacement turns can leave old target
         // objects such as Cinderace in the score records after Alcremie enters.
         // Choosing the latest two unique opponent targets matches doubles board
@@ -2719,8 +2719,30 @@ namespace AIBridge {
         return false;
     }
 
+
+    static inline bool FreshMoveRecordsIncludeSpecies(u16 species) {
+        if (species == 0) return false;
+        for (u32 i = 0; i < move_record_count; i++) {
+            const MoveScoreRecord& r = move_records[i];
+            if (!IsFreshMoveRecord(r)) continue;
+            if (r.target_species == species) return true;
+        }
+        return false;
+    }
+
+    static inline bool SwitchInAppearsAlreadyActive(u64 state_ptr, u16 switch_species, u16 active_species) {
+        // If a proposed switch-in from the resolved CPU team is already present
+        // in the fresh target records, it is probably already on the field.  This
+        // prevents repeated commits such as "switch Gallade into Lucario" after
+        // Lucario is already active.  It is intentionally conservative for mirror
+        // species cases.
+        if (switch_species == 0 || switch_species == active_species) return true;
+        if (!SpeciesBelongsToResolvedTeam(state_ptr, switch_species)) return false;
+        return FreshMoveRecordsIncludeSpecies(switch_species);
+    }
+
     // ---------------------------------------------------------------------
-    // V29: Gen-IV-inspired + fresh-board active-owned role switch scoring
+    // V30: Gen-IV-inspired + fresh-board active-owned role switch scoring
     // ---------------------------------------------------------------------
     // This version intentionally makes a larger design step:
     // - Use Gen IV's documented send-in concepts as scoring features:
@@ -2906,27 +2928,29 @@ namespace AIBridge {
 
         if (!HasSpeciesTypes(switch_types) || !HasSpeciesTypes(active_types)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v29_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v30_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
         }
 
-        // V29: opening Fake Out protection is active-owned and consumed once.
-        // A partner's Fake Out no longer blocks this slot from switching, and
-        // Mienshao does not receive permanent switch immunity if no earlier
-        // switch has happened.
-        if (active_species == 620 && SummaryHasMove(252) && !AIBridge::opening_fakeout_guard_consumed) {
-            AIBridge::opening_fakeout_guard_consumed = true;
+        // Active-owned Fake Out/priority tempo. Earlier builds consumed an
+        // opening Fake Out guard after checking only one candidate row, which
+        // could block action 2 but still allow action 3 in the same window. V30
+        // removes that row-order artifact. Fake Out is a hard delay only if the
+        // active Pokémon's Fake Out is actually scoring positively; otherwise it
+        // remains a normal opportunity-cost feature later in the score.
+        if (active_species == 620 && SummaryHasPositiveMove(252)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v29_score blocked: opening_fakeout_once active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v30_score blocked: active_positive_fakeout active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
         }
-        if (active_species == 620 && SummaryHasPositiveMove(252)) {
+
+        if (SwitchInAppearsAlreadyActive(state_ptr, switch_species, active_species)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v29_score delayed: active_positive_fakeout active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v30_score blocked: switchin_already_visible active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -2957,7 +2981,7 @@ namespace AIBridge {
         if (ActiveOwnedSetupOrPriorityDelay(active_species)) {
             score -= 42;
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v29_score delayed: active_owned_setup_or_priority active=%u/%s switchin=%u/%s\n",
+                Logging.Log("[ai_bridge] %s v30_score penalty: active_owned_setup_or_priority active=%u/%s switchin=%u/%s\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species));
             }
         }
@@ -3053,7 +3077,7 @@ namespace AIBridge {
         if (future_value > 0 && best_move <= 0 && active_danger_hits > 0) score += future_value;
         if (future_value > 0 && best_move >= 3) score -= (future_value / 2);
 
-        // V29 generalized type/move board judgement.  Previous builds leaned
+        // V30 generalized type/move board judgement.  Previous builds leaned
         // too hard on named examples (Cinderace/Grimmsnarl/Lucario).  Keep the
         // known move profiles, but reward/punish by type relationship so this
         // applies to later trainers and different player teams.
@@ -3112,7 +3136,7 @@ namespace AIBridge {
         if (known_threat_count == 1 && better_defense_count >= 1 && (offensive_hits >= 1 || gen4_super_hits >= 1) && switchin_bad_hits == 0) score += 30;
 
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v29_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u worse=%u active_danger=%u offense=%u gen4=%u priority=%u cinderace=%u grimmsnarl=%u alcremie=%u fairy=%u future=%d\n",
+            Logging.Log("[ai_bridge] %s v30_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u worse=%u active_danger=%u offense=%u gen4=%u priority=%u cinderace=%u grimmsnarl=%u alcremie=%u fairy=%u future=%d\n",
                 tag,
                 static_cast<u32>(active_species), KnownSpeciesName(active_species), TypeName(active_types.t1), TypeName(active_types.t2),
                 static_cast<u32>(switch_species), KnownSpeciesName(switch_species), TypeName(switch_types.t1), TypeName(switch_types.t2),
@@ -3130,13 +3154,13 @@ namespace AIBridge {
         const s32 matchup_score = ScoreSwitchMatchupV20(state_ptr, active_species, switch_in_species, tag, hit);
         if (matchup_score < 15) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v29_gate blocked score=%d threshold=15 active=%u/%s switchin=%u/%s\n",
+                Logging.Log("[ai_bridge] %s v30_gate blocked score=%d threshold=15 active=%u/%s switchin=%u/%s\n",
                     tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
             }
             return false;
         }
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v29_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v30_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
                 tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
         }
         return true;
@@ -3337,11 +3361,11 @@ namespace AIBridge {
     }
 
     static inline u32 TargetScoreForBestSwitch(u32 action_id, s32 matchup_score) {
-        // V29: dynamic but not blind. Strongly approved type/move switches
+        // V30: dynamic but not blind. Strongly approved type/move switches
         // should actually beat ordinary move rows. Marginal switches stay modest.
         // This is still best-row only; it does not enable every switch candidate.
         u32 target = TargetScoreForAction(action_id);
-        // V29 final: if the generalized scorer approves the single best row,
+        // V30 final: if the generalized scorer approves the single best row,
         // make that row actually win final selection. This is not broad spam:
         // only one best row can reach this branch.
         if (matchup_score >= 15) return 1000000;
@@ -3358,7 +3382,7 @@ namespace AIBridge {
         *reinterpret_cast<volatile u32*>(state_ptr + 0xFC) = score;
         *reinterpret_cast<volatile u32*>(state_ptr + 0x100) = action_id;
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v29_final_commit action=%u score=%u state=%016lx\n",
+            Logging.Log("[ai_bridge] %s v30_final_commit action=%u score=%u state=%016lx\n",
                 tag, action_id, score, state_ptr);
         }
     }
@@ -3504,7 +3528,7 @@ namespace AIBridge {
 
             if (best_index == 0xFFFFFFFF || best_score < 15) {
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s v29_gate blocked_best best_score=%d threshold=15 action=%u\n", tag, best_score, best_action);
+                    Logging.Log("[ai_bridge] %s v30_gate blocked_best best_score=%d threshold=15 action=%u\n", tag, best_score, best_action);
                 }
                 return;
             }
@@ -3533,10 +3557,10 @@ namespace AIBridge {
                 // action-selection fields to commit the selected row.
                 CommitBestSwitchToFinalFieldsV29(state_ptr, best_action, 1000000, tag, hit);
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s switch_policy_v29 best_row changed=%u total=%u action=%u best_score=%d dynamic_target=%u final_commit=1000000 matching=%u native_only=%u\n",
+                    Logging.Log("[ai_bridge] %s switch_policy_v30 best_row changed=%u total=%u action=%u best_score=%d dynamic_target=%u final_commit=1000000 matching=%u native_only=%u\n",
                         tag, changed, AIBridge::policy_forced_total, best_action, best_score, target_score, matching,
                         global_config.ai_bridge.switch_native_score_only ? 1 : 0);
-                    DumpCandidateTable("candidate_score_after_switch_policy_v29", state_ptr, hit);
+                    DumpCandidateTable("candidate_score_after_switch_policy_v30", state_ptr, hit);
                 }
             }
             return;
@@ -3798,7 +3822,7 @@ HOOK_DEFINE_INLINE(AIBridgeCandidateScorePostProbe) {
         AIBridge::ForceExistingCandidatesIfEnabled(ctx->X[19], "candidate_score", AIBridge::score_hits);
         if (global_config.ai_bridge.switch_policy_mode == 5 || global_config.ai_bridge.switch_policy_mode == 6 || global_config.ai_bridge.switch_policy_mode == 7) {
             AIBridge::CaptureDeferredCandidateState(ctx->X[19], AIBridge::score_hits);
-            // V29: If a later candidate table rebuild happens after the replacement
+            // V30: If a later candidate table rebuild happens after the replacement
             // board has already been rescored, commit from the candidate hook too.
             // This prevents using the early stale Cinderace+Alcremie mixed window
             // when a cleaner Alcremie+Grimmsnarl window exists a few frames later.
