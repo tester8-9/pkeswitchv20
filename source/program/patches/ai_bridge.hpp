@@ -103,7 +103,12 @@ namespace AIBridge {
 
 
     static inline bool LooksLikePtr(u64 ptr) {
-        return ptr >= 0x100000;
+        // V25: avoid treating packed constants like 0x0000002100000000 as
+        // readable heap pointers.  The battle objects we validated in logs
+        // live in the 0x218.../0x219.../0x21b... region; loose scanning of
+        // lower 0x21000000xx values caused harmless but noisy Yuzu unmapped
+        // read warnings.
+        return ptr >= 0x2180000000ULL && ptr < 0x2300000000ULL;
     }
 
     static inline u16 ReadU16(u64 ptr, u32 offset) {
@@ -588,7 +593,10 @@ namespace AIBridge {
     }
 
     static inline void ScanKnownSpecies(const char* tag, u64 ptr, u32 hit, u32 bytes_to_scan) {
+        // V25: species probing is now deep-debug only.  Normal gameplay logs
+        // already use fixed species offsets and do not need blind scanning.
         if (!global_config.ai_bridge.score_survey_mode) return;
+        if (!global_config.ai_bridge.score_survey_dump_state) return;
         if (!ShouldLog(hit)) return;
         if (!LooksLikePtr(ptr)) return;
         if (bytes_to_scan > 0x200) bytes_to_scan = 0x200;
@@ -1177,13 +1185,13 @@ namespace AIBridge {
         if (!ShouldLog(hit)) return;
         const TrainerTeamDef* team = ResolveTrainerTeam(state_ptr);
         if (!team) {
-            Logging.Log("[ai_bridge] %s v23_team unresolved active=%u/%s fallback=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v25_team unresolved active=%u/%s fallback=%u/%s\n",
                 tag,
                 static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
                 static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)));
             return;
         }
-        Logging.Log("[ai_bridge] %s v23_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
+        Logging.Log("[ai_bridge] %s v25_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
             tag, static_cast<u32>(team->trainer_id),
             static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
             static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)),
@@ -2609,7 +2617,7 @@ namespace AIBridge {
     }
 
     // ---------------------------------------------------------------------
-    // V23: Gen-IV-inspired + VGC-ish switch scoring
+    // V25: Gen-IV-inspired + VGC-ish switch scoring
     // ---------------------------------------------------------------------
     // This version intentionally makes a larger design step:
     // - Use Gen IV's documented send-in concepts as scoring features:
@@ -2738,7 +2746,7 @@ namespace AIBridge {
 
         if (!HasSpeciesTypes(switch_types) || !HasSpeciesTypes(active_types)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v23_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v25_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -2749,14 +2757,14 @@ namespace AIBridge {
         // unless a future build detects catastrophic danger/low HP directly.
         if (active_species == 620 && SummaryHasMove(252) && AIBridge::policy_forced_total == 0) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v23_score blocked: first_fakeout_window active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v25_score blocked: first_fakeout_window active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
         }
         if (active_species == 620 && SummaryHasPositiveMove(252)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v23_score blocked: fakeout_positive active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v25_score blocked: fakeout_positive active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -2890,7 +2898,7 @@ namespace AIBridge {
         if (known_threat_count == 1 && better_defense_count >= 1 && (offensive_hits >= 1 || gen4_super_hits >= 1) && switchin_bad_hits == 0) score += 30;
 
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v23_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u worse=%u active_danger=%u offense=%u gen4=%u priority=%u cinderace=%u grimmsnarl=%u alcremie=%u fairy=%u future=%d\n",
+            Logging.Log("[ai_bridge] %s v25_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u worse=%u active_danger=%u offense=%u gen4=%u priority=%u cinderace=%u grimmsnarl=%u alcremie=%u fairy=%u future=%d\n",
                 tag,
                 static_cast<u32>(active_species), KnownSpeciesName(active_species), TypeName(active_types.t1), TypeName(active_types.t2),
                 static_cast<u32>(switch_species), KnownSpeciesName(switch_species), TypeName(switch_types.t1), TypeName(switch_types.t2),
@@ -2908,13 +2916,13 @@ namespace AIBridge {
         const s32 matchup_score = ScoreSwitchMatchupV20(state_ptr, active_species, switch_in_species, tag, hit);
         if (matchup_score < 40) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v23_gate blocked score=%d threshold=40 active=%u/%s switchin=%u/%s\n",
+                Logging.Log("[ai_bridge] %s v25_gate blocked score=%d threshold=40 active=%u/%s switchin=%u/%s\n",
                     tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
             }
             return false;
         }
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v23_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v25_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
                 tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
         }
         return true;
@@ -3114,6 +3122,20 @@ namespace AIBridge {
         return global_config.ai_bridge.switch_score;
     }
 
+    static inline u32 TargetScoreForBestSwitch(u32 action_id, s32 matchup_score) {
+        // V25: 115 was sometimes enough to enable the row but not enough to
+        // win final action selection.  Keep the base config as the floor, then
+        // scale upward only when the matchup scorer is highly confident.
+        // This avoids the old v5/v6 1,000,000 spam while letting obvious
+        // Fairy-board -> Lucario pivots actually commit.
+        u32 target = TargetScoreForAction(action_id);
+        if (matchup_score >= 360 && target < 170) target = 170;
+        else if (matchup_score >= 280 && target < 155) target = 155;
+        else if (matchup_score >= 200 && target < 140) target = 140;
+        else if (matchup_score >= 120 && target < 128) target = 128;
+        return target;
+    }
+
     static inline bool NativeScoreAllowed(u32 native_score) {
         if (native_score < global_config.ai_bridge.switch_min_native_score) return false;
         if (global_config.ai_bridge.switch_max_native_score != 0 &&
@@ -3255,7 +3277,7 @@ namespace AIBridge {
 
             if (best_index == 0xFFFFFFFF || best_score < 40) {
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s v23_gate blocked_best best_score=%d threshold=40 action=%u\n", tag, best_score, best_action);
+                    Logging.Log("[ai_bridge] %s v25_gate blocked_best best_score=%d threshold=40 action=%u\n", tag, best_score, best_action);
                 }
                 return;
             }
@@ -3263,7 +3285,7 @@ namespace AIBridge {
             const u64 entry = state_ptr + 0xC8 + (static_cast<u64>(best_index) * 8);
             volatile u8* enabled = reinterpret_cast<volatile u8*>(entry + 0x1);
             volatile u32* score_ptr = reinterpret_cast<volatile u32*>(entry + 0x4);
-            const u32 target_score = TargetScoreForAction(best_action);
+            const u32 target_score = TargetScoreForBestSwitch(best_action, best_score);
             if (!*enabled) { *enabled = 1; changed = 1; }
             if (!global_config.ai_bridge.switch_native_score_only && *score_ptr < target_score) { *score_ptr = target_score; changed = 1; }
             if (changed) {
@@ -3280,10 +3302,10 @@ namespace AIBridge {
                     }
                 }
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s switch_policy_v23 best_row changed=%u total=%u action=%u best_score=%d target_score=%u matching=%u native_only=%u\n",
+                    Logging.Log("[ai_bridge] %s switch_policy_v25 best_row changed=%u total=%u action=%u best_score=%d dynamic_target=%u matching=%u native_only=%u\n",
                         tag, changed, AIBridge::policy_forced_total, best_action, best_score, target_score, matching,
                         global_config.ai_bridge.switch_native_score_only ? 1 : 0);
-                    DumpCandidateTable("candidate_score_after_switch_policy_v23", state_ptr, hit);
+                    DumpCandidateTable("candidate_score_after_switch_policy_v25", state_ptr, hit);
                 }
             }
             return;
