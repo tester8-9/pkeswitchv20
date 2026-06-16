@@ -91,7 +91,6 @@ keep_chain_after_brilliant = true
 # Mod allows cycling dex animations
 [dex_animations]
 active = false
-
 [ai_bridge]
 active = true
 install_candidate_hooks = true
@@ -112,10 +111,18 @@ candidate_dump_count = 8
 
 force_output_score = 0
 force_pokechange_enable = -1
-force_final_selection = false
-force_candidate_entry = false
-force_existing_candidates = false
 
+force_final_selection = false
+force_final_action_id = 0
+force_final_score = 1000000
+
+force_candidate_entry = false
+force_candidate_slot = 0
+force_candidate_action_id = 0
+force_candidate_score = 1000000
+force_candidate_enable = true
+
+force_existing_candidates = false
 force_existing_action_min = 2
 force_existing_action_max = 5
 force_existing_score = 1000000
