@@ -1212,6 +1212,41 @@ namespace AIBridge {
         return TeamContains(*team, species);
     }
 
+    static inline bool IsProtectedAceTrainerId(u16 trainer_id) {
+        switch (trainer_id) {
+            case 32: case 36: case 37: case 77: case 78: case 107: case 108: case 134:
+            case 135: case 136: case 144: case 149: case 189: case 190: case 210: case 211:
+            case 212: case 213: case 231: case 249: case 250: case 251: case 258: case 259:
+            case 260: case 261: case 262: case 264: case 265: case 267: case 268: case 269:
+            case 289: case 341: case 342: case 343: case 344: case 345: case 347: case 348:
+            case 349: case 357: case 358: case 359: case 360: case 363: case 365: case 375:
+            case 377: case 378: case 379: case 380: case 387: case 388: case 389: case 390:
+            case 391: case 392: case 393: case 395: case 396: case 397: case 413:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static inline u16 LastOriginalTeamSpecies(const TrainerTeamDef* team) {
+        if (!team) return 0;
+        for (s32 i = 5; i >= 0; i--) {
+            if (team->species[i] != 0) return team->species[i];
+        }
+        return 0;
+    }
+
+    static inline bool IsProtectedAceSwitchIn(u64 state_ptr, u32 action_id, u16 switch_species) {
+        const TrainerTeamDef* team = ResolveTrainerTeam(state_ptr);
+        if (!team) return false;
+        if (!IsProtectedAceTrainerId(team->trainer_id)) return false;
+        const u16 ace = LastOriginalTeamSpecies(team);
+        if (ace == 0 || switch_species != ace) return false;
+        // This only blocks AI-bridge voluntary switch commits into the original
+        // final-slot story ace. Native forced send-in after a faint is left alone.
+        return true;
+    }
+
     static inline s32 RosterSlotForSpecies(u16 species, bool prefer_active) {
         if (species == 0) return -1;
         for (u32 i = 0; i < 6; i++) {
@@ -1258,7 +1293,7 @@ namespace AIBridge {
         if (observed_slot >= 0) roster_active[observed_slot] = true;
         roster_initialized = true;
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v34_roster_init trainer=%u observed_active=%u/%s slots=%u%c,%u%c,%u%c,%u%c,%u%c,%u%c\n",
+            Logging.Log("[ai_bridge] %s v36_roster_init trainer=%u observed_active=%u/%s slots=%u%c,%u%c,%u%c,%u%c,%u%c,%u%c\n",
                 tag, static_cast<u32>(team->trainer_id), static_cast<u32>(observed_active), KnownSpeciesName(observed_active),
                 static_cast<u32>(roster_species[0]), roster_active[0] ? '*' : '-',
                 static_cast<u32>(roster_species[1]), roster_active[1] ? '*' : '-',
@@ -1323,7 +1358,7 @@ namespace AIBridge {
         if (to_slot >= 0) roster_active[to_slot] = true;
         roster_commit_count++;
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v34_roster_commit action=%u from=%u/%s slot=%d to=%u/%s slot=%d commits=%u slots=%u%c,%u%c,%u%c,%u%c,%u%c,%u%c\n",
+            Logging.Log("[ai_bridge] %s v36_roster_commit action=%u from=%u/%s slot=%d to=%u/%s slot=%d commits=%u slots=%u%c,%u%c,%u%c,%u%c,%u%c,%u%c\n",
                 tag, action_id,
                 static_cast<u32>(active_species), KnownSpeciesName(active_species), from_slot,
                 static_cast<u32>(switch_species), KnownSpeciesName(switch_species), to_slot,
@@ -1341,13 +1376,13 @@ namespace AIBridge {
         if (!ShouldLog(hit)) return;
         const TrainerTeamDef* team = ResolveTrainerTeam(state_ptr);
         if (!team) {
-            Logging.Log("[ai_bridge] %s v34_team unresolved active=%u/%s fallback=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v36_team unresolved active=%u/%s fallback=%u/%s\n",
                 tag,
                 static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
                 static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)));
             return;
         }
-        Logging.Log("[ai_bridge] %s v34_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
+        Logging.Log("[ai_bridge] %s v36_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
             tag, static_cast<u32>(team->trainer_id),
             static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
             static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)),
@@ -3042,19 +3077,20 @@ namespace AIBridge {
     }
 
     static inline bool ActiveOwnedSetupOrPriorityDelay(u16 active_species) {
-        // Best available proxy until the exact move-owner structure is mapped.
-        // This intentionally depends on the active species, so a partner's Fake Out
-        // no longer blocks this slot from switching.
+        // V36: soft delay only when the active-owned role appears useful, not just
+        // present.  This avoids Gallade being frozen in place by neutral Trick
+        // Room/Wide Guard records while still respecting genuinely valuable setup.
         if (active_species == 475) { // Gallade: Trick Room / Wide Guard utility.
-            if (SummaryHasMoveId(433) || (SummaryHasMoveId(469) && VisibleBoardHasSpreadOrFairyPressure())) return true;
+            if (SummaryHasPositiveMove(433)) return true;
+            if (SummaryHasPositiveMove(469) && VisibleBoardHasSpreadOrFairyPressure()) return true;
         }
         if (active_species == 823 || active_species == 547) { // Tailwind users.
-            if (SummaryHasMoveId(366)) return true;
+            if (SummaryHasPositiveMove(366)) return true;
         }
         if ((active_species == 534 || active_species == 448 || active_species == 620) && SummaryHasPositivePriorityInto(0)) {
             return true;
         }
-        if ((active_species == 620 || active_species == 534) && SummaryHasMoveId(469) && VisibleBoardHasSpreadOrFairyPressure()) {
+        if ((active_species == 620 || active_species == 534) && SummaryHasPositiveMove(469) && VisibleBoardHasSpreadOrFairyPressure()) {
             return true;
         }
         return false;
@@ -3108,16 +3144,30 @@ namespace AIBridge {
     }
 
     static inline bool ActiveHasOpeningRoleValue(u16 active_species) {
-        // Generalized version of the old "preserve Mienshao" rule.  This keeps
-        // the active slot if THAT active has immediate support/tempo value, but
-        // it does not block the partner from switching.
-        if (SpeciesCommonlyHasFakeOut(active_species) && (SummaryHasPositiveMove(252) || SummaryHasMoveId(252))) return true;
-        if (SpeciesCommonlyHasWideGuardOrSpreadGuard(active_species) && SummaryHasMoveId(469) && VisibleBoardHasSpreadOrFairyPressure()) return true;
-        if (SpeciesCommonlySetsSpeedOrRoom(active_species) && (SummaryHasMoveId(433) || SummaryHasMoveId(366))) return true;
+        // V36: hard opening preservation must be evidence-based, not merely
+        // "this species can carry support."  V34 over-blocked Gallade because
+        // Trick Room/Wide Guard appeared in the shared summary with neutral scores.
+        // Hard-block only when the active's immediate role is actually scoring
+        // positively or very specifically opening-tempo relevant.
+        if (SpeciesCommonlyHasFakeOut(active_species) && SummaryHasPositiveMove(252)) return true;
+
+        // Trick Room / Tailwind should only hard-preserve if the scoring layer is
+        // actually rewarding it.  Neutral 0-score TR/Tailwind does not block a
+        // strong defensive/offensive pivot.
+        if (SpeciesCommonlySetsSpeedOrRoom(active_species)) {
+            if (SummaryHasPositiveMove(433) || SummaryHasPositiveMove(366)) return true;
+        }
+
+        // Wide Guard is valuable, but in doubles it should usually be a soft
+        // penalty unless it is actually being scored positively.  This lets the
+        // partner pivot while preserving at least one guard user.
+        if (SpeciesCommonlyHasWideGuardOrSpreadGuard(active_species)) {
+            if (SummaryHasPositiveMove(469) && VisibleBoardHasSpreadOrFairyPressure()) return true;
+        }
+
         if (SummaryHasPositivePriorityInto(0)) {
             // Priority is treated as a hold reason only for species commonly used
-            // as priority/tempo pieces.  This avoids partner-owned priority from
-            // globally preventing all switches.
+            // as priority/tempo pieces. This approximates "can pick off low HP".
             switch (active_species) {
                 case 448: // Lucario Bullet Punch / Extreme Speed style role
                 case 620: // Mienshao Fake Out/Quick Guard-style tempo
@@ -3137,7 +3187,7 @@ namespace AIBridge {
 
         if (!HasSpeciesTypes(switch_types) || !HasSpeciesTypes(active_types)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v34_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v36_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -3151,26 +3201,26 @@ namespace AIBridge {
         // remains a normal opportunity-cost feature later in the score.
         if (active_species == 620 && SummaryHasPositiveMove(252)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v34_score blocked: active_positive_fakeout active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v36_score blocked: active_positive_fakeout active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
         }
 
-        // V34: generalized active-slot preservation.  Earlier v33 wording was
+        // V36: generalized active-slot preservation.  Earlier v33 wording was
         // Mienshao-specific.  The actual rule should be role-specific: if the
         // active Pokémon itself has valuable immediate tempo/support, preserve
         // that active slot and allow the partner to be the pivot instead.
         if (roster_commit_count == 0 && VisibleBoardHasSpreadOrFairyPressure() && ActiveHasOpeningRoleValue(active_species)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v34_score blocked: preserve_opening_role active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v36_score blocked: preserve_opening_role active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
         }
         if (SwitchInAppearsAlreadyActive(state_ptr, switch_species, active_species)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v34_score blocked: switchin_already_visible active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v36_score blocked: switchin_already_visible active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -3201,7 +3251,7 @@ namespace AIBridge {
         if (ActiveOwnedSetupOrPriorityDelay(active_species)) {
             score -= 42;
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v34_score penalty: active_owned_setup_or_priority active=%u/%s switchin=%u/%s\n",
+                Logging.Log("[ai_bridge] %s v36_score penalty: active_owned_setup_or_priority active=%u/%s switchin=%u/%s\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species));
             }
         }
@@ -3273,6 +3323,12 @@ namespace AIBridge {
         const bool sees_ground = TypeArrayIncludes(visible_threat_types, visible_threat_type_count, BT_GROUND);
         const bool sees_psychic = TypeArrayIncludes(visible_threat_types, visible_threat_type_count, BT_PSYCHIC);
         const bool sees_flying = TypeArrayIncludes(visible_threat_types, visible_threat_type_count, BT_FLYING);
+        const bool perish_song_seen = SummaryHasMoveId(195);
+        if (perish_song_seen && ShouldLog(hit)) {
+            Logging.Log("[ai_bridge] %s v36_note perish_song_seen move=195 counter_not_mapped active=%u/%s switchin=%u/%s\n",
+                tag, static_cast<u32>(active_species), KnownSpeciesName(active_species),
+                static_cast<u32>(switch_species), KnownSpeciesName(switch_species));
+        }
 
         // Generic type-board heuristics, not species-specific. These reward a
         // switch-in for solving the visible board by typing and pressure. This
@@ -3356,7 +3412,7 @@ namespace AIBridge {
         if (known_threat_count == 1 && better_defense_count >= 1 && (offensive_hits >= 1 || gen4_super_hits >= 1) && switchin_bad_hits == 0) score += 30;
 
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v34_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u worse=%u active_danger=%u offense=%u gen4=%u priority=%u cinderace=%u grimmsnarl=%u alcremie=%u fairy=%u future=%d\n",
+            Logging.Log("[ai_bridge] %s v36_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u worse=%u active_danger=%u offense=%u gen4=%u priority=%u cinderace=%u grimmsnarl=%u alcremie=%u fairy=%u future=%d\n",
                 tag,
                 static_cast<u32>(active_species), KnownSpeciesName(active_species), TypeName(active_types.t1), TypeName(active_types.t2),
                 static_cast<u32>(switch_species), KnownSpeciesName(switch_species), TypeName(switch_types.t1), TypeName(switch_types.t2),
@@ -3370,17 +3426,27 @@ namespace AIBridge {
     static inline bool V16MatchupGateAllows(u64 state_ptr, u32 action_id, const char* tag, u32 hit) {
         const u16 switch_in_species = InferredSwitchSpeciesForAction(state_ptr, action_id);
         const u16 active_species = CandidateActiveSpecies(state_ptr);
+        if (IsProtectedAceSwitchIn(state_ptr, action_id, switch_in_species)) {
+            if (ShouldLog(hit)) {
+                const TrainerTeamDef* team = ResolveTrainerTeam(state_ptr);
+                Logging.Log("[ai_bridge] %s v36_gate blocked: protected_story_ace trainer=%u action=%u switchin=%u/%s active=%u/%s\n",
+                    tag, team ? static_cast<u32>(team->trainer_id) : 0, action_id,
+                    static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species),
+                    static_cast<u32>(active_species), KnownSpeciesName(active_species));
+            }
+            return false;
+        }
         LogResolvedTeam(tag, state_ptr, hit);
         const s32 matchup_score = ScoreSwitchMatchupV20(state_ptr, active_species, switch_in_species, tag, hit);
         if (matchup_score < 15) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v34_gate blocked score=%d threshold=15 active=%u/%s switchin=%u/%s\n",
+                Logging.Log("[ai_bridge] %s v36_gate blocked score=%d threshold=15 active=%u/%s switchin=%u/%s\n",
                     tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
             }
             return false;
         }
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v34_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v36_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
                 tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
         }
         return true;
@@ -3602,7 +3668,7 @@ namespace AIBridge {
         *reinterpret_cast<volatile u32*>(state_ptr + 0xFC) = score;
         *reinterpret_cast<volatile u32*>(state_ptr + 0x100) = action_id;
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v34_final_commit action=%u score=%u state=%016lx\n",
+            Logging.Log("[ai_bridge] %s v36_final_commit action=%u score=%u state=%016lx\n",
                 tag, action_id, score, state_ptr);
         }
     }
@@ -3733,7 +3799,7 @@ namespace AIBridge {
                 if (!NativeScoreAllowed(native_score)) continue;
                 if (IsPredictedActiveSwitchDestination(state_ptr, action_id, tag, hit)) {
                     if (ShouldLog(hit)) {
-                        Logging.Log("[ai_bridge] %s v34_gate skip action=%u reason=no_predicted_bench_mapping\n", tag, action_id);
+                        Logging.Log("[ai_bridge] %s v36_gate skip action=%u reason=no_predicted_bench_mapping\n", tag, action_id);
                     }
                     continue;
                 }
@@ -3744,6 +3810,15 @@ namespace AIBridge {
                 LogResolvedTeam(tag, state_ptr, hit);
                 const u16 switch_in_species = InferredSwitchSpeciesForAction(state_ptr, action_id);
                 const u16 active_species = CandidateActiveSpecies(state_ptr);
+                if (IsProtectedAceSwitchIn(state_ptr, action_id, switch_in_species)) {
+                    if (ShouldLog(hit)) {
+                        const TrainerTeamDef* team = ResolveTrainerTeam(state_ptr);
+                        Logging.Log("[ai_bridge] %s v36_gate skip action=%u reason=protected_story_ace trainer=%u switchin=%u/%s\n",
+                            tag, action_id, team ? static_cast<u32>(team->trainer_id) : 0,
+                            static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
+                    }
+                    continue;
+                }
                 const s32 candidate_score = ScoreSwitchMatchupV20(state_ptr, active_species, switch_in_species, tag, hit);
                 if (candidate_score > best_score) {
                     best_score = candidate_score;
@@ -3754,7 +3829,7 @@ namespace AIBridge {
 
             if (best_index == 0xFFFFFFFF || best_score < 15) {
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s v34_gate blocked_best best_score=%d threshold=15 action=%u\n", tag, best_score, best_action);
+                    Logging.Log("[ai_bridge] %s v36_gate blocked_best best_score=%d threshold=15 action=%u\n", tag, best_score, best_action);
                 }
                 return;
             }
@@ -3788,10 +3863,10 @@ namespace AIBridge {
                 }
                 CommitBestSwitchToFinalFieldsV29(state_ptr, best_action, 1000000, tag, hit);
                 if (ShouldLog(hit)) {
-                    Logging.Log("[ai_bridge] %s switch_policy_v34 best_row changed=%u total=%u action=%u best_score=%d dynamic_target=%u final_commit=1000000 matching=%u native_only=%u\n",
+                    Logging.Log("[ai_bridge] %s switch_policy_v36 best_row changed=%u total=%u action=%u best_score=%d dynamic_target=%u final_commit=1000000 matching=%u native_only=%u\n",
                         tag, changed, AIBridge::policy_forced_total, best_action, best_score, target_score, matching,
                         global_config.ai_bridge.switch_native_score_only ? 1 : 0);
-                    DumpCandidateTable("candidate_score_after_switch_policy_v34", state_ptr, hit);
+                    DumpCandidateTable("candidate_score_after_switch_policy_v36", state_ptr, hit);
                 }
             }
             return;
