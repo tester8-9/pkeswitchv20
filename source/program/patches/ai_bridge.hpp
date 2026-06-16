@@ -1177,13 +1177,13 @@ namespace AIBridge {
         if (!ShouldLog(hit)) return;
         const TrainerTeamDef* team = ResolveTrainerTeam(state_ptr);
         if (!team) {
-            Logging.Log("[ai_bridge] %s v20_team unresolved active=%u/%s fallback=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v21_team unresolved active=%u/%s fallback=%u/%s\n",
                 tag,
                 static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
                 static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)));
             return;
         }
-        Logging.Log("[ai_bridge] %s v20_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
+        Logging.Log("[ai_bridge] %s v21_team trainer=%u active=%u/%s fallback=%u/%s slots=%u,%u,%u,%u,%u,%u\n",
             tag, static_cast<u32>(team->trainer_id),
             static_cast<u32>(CandidateActiveSpecies(state_ptr)), KnownSpeciesName(CandidateActiveSpecies(state_ptr)),
             static_cast<u32>(CandidateSwitchInSpecies(state_ptr)), KnownSpeciesName(CandidateSwitchInSpecies(state_ptr)),
@@ -2608,7 +2608,7 @@ namespace AIBridge {
 
         if (!HasSpeciesTypes(switch_types) || !HasSpeciesTypes(active_types)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v20_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v21_score blocked: unknown_types active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -2619,7 +2619,7 @@ namespace AIBridge {
         // from wasting immediate tempo by switching.
         if (active_species == 620 && SummaryHasPositiveMove(252)) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v20_score blocked: active_fakeout_tempo active=%u/%s switchin=%u/%s best=%d worst=%d\n",
+                Logging.Log("[ai_bridge] %s v21_score blocked: active_fakeout_tempo active=%u/%s switchin=%u/%s best=%d worst=%d\n",
                     tag, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_species), KnownSpeciesName(switch_species), best_move, worst_move);
             }
             return -9999;
@@ -2692,9 +2692,14 @@ namespace AIBridge {
         if (switch_species == 448) score -= 6;              // Lucario is powerful but risky.
         if (switch_species == 675 && sees_fairy) score -= 120; // Pangoro into Fairy is awful.
         if (switch_species == 475 && sees_fairy) score -= 55;  // Gallade dislikes Fairy boards.
-        if (switch_species == 448 && sees_alcremie && !sees_cinderace) score += 28; // Steel pressure into Fairy if no Fire threat.
-        if (switch_species == 448 && sees_cinderace) score -= 75; // Cinderace move profile punishes Lucario.
-        if (switch_species == 534 && sees_cinderace) score += 18; // Conkeldurr usually safer than Lucario vs Cinderace.
+        // V21: Lucario should not be globally suppressed by Cinderace when a
+        // Fairy threat is also visible.  It is still unsafe into Fire pressure,
+        // but Steel STAB into Fairy can justify switching ONE Fighting-type out.
+        if (switch_species == 448 && sees_alcremie) score += 110; // Steel pressure into Alcremie.
+        else if (switch_species == 448 && sees_grimmsnarl) score += 65; // Steel/Fighting pressure into Fairy/Dark.
+        if (switch_species == 448 && sees_cinderace && sees_fairy) score -= 35; // mixed board: Fire danger, but Fairy payoff.
+        else if (switch_species == 448 && sees_cinderace) score -= 85; // pure Cinderace board still punishes Lucario.
+        if (switch_species == 534 && sees_cinderace) score += 12; // Conkeldurr may be safer than Lucario, but not automatic.
 
         // Quality gates and anti-spam controls.
         if (known_threat_count == 0) score -= 90;
@@ -2709,7 +2714,7 @@ namespace AIBridge {
         if (known_threat_count == 1 && better_defense_count >= 1 && offensive_hits >= 1 && switchin_bad_hits == 0) score += 28;
 
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v20_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u active_danger=%u offense=%u cinderace=%u alcremie=%u fairy=%u\n",
+            Logging.Log("[ai_bridge] %s v21_score active=%u/%s(%s/%s) switchin=%u/%s(%s/%s) score=%d best=%d worst=%d threats=%u known=%u bad=%u better=%u active_danger=%u offense=%u cinderace=%u alcremie=%u fairy=%u\n",
                 tag,
                 static_cast<u32>(active_species), KnownSpeciesName(active_species), TypeName(active_types.t1), TypeName(active_types.t2),
                 static_cast<u32>(switch_species), KnownSpeciesName(switch_species), TypeName(switch_types.t1), TypeName(switch_types.t2),
@@ -2726,13 +2731,13 @@ namespace AIBridge {
         const s32 matchup_score = ScoreSwitchMatchupV20(state_ptr, active_species, switch_in_species, tag, hit);
         if (matchup_score < 20) {
             if (ShouldLog(hit)) {
-                Logging.Log("[ai_bridge] %s v20_gate blocked score=%d threshold=20 active=%u/%s switchin=%u/%s\n",
+                Logging.Log("[ai_bridge] %s v21_gate blocked score=%d threshold=20 active=%u/%s switchin=%u/%s\n",
                     tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
             }
             return false;
         }
         if (ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s v20_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
+            Logging.Log("[ai_bridge] %s v21_gate allowed score=%d active=%u/%s switchin=%u/%s\n",
                 tag, matchup_score, static_cast<u32>(active_species), KnownSpeciesName(active_species), static_cast<u32>(switch_in_species), KnownSpeciesName(switch_in_species));
         }
         return true;
@@ -3040,6 +3045,73 @@ namespace AIBridge {
             : global_config.ai_bridge.switch_max_candidates_per_hit;
         u32 changed = 0;
 
+        // V21: mode 7 is now best-row selection, not first-row selection.
+        // V20 could allow action 2/Conkeldurr simply because it was the first
+        // passing candidate, even if action 3/Lucario was the better strategic
+        // answer to a Fairy board.  Score all matching rows, choose the best one,
+        // and enable only that row.
+        if (mode == 7) {
+            s32 best_score = -1000000;
+            u32 best_index = 0xFFFFFFFF;
+            u32 best_action = 0;
+            for (u32 i = 0; i < count; i++) {
+                const u64 entry = state_ptr + 0xC8 + (static_cast<u64>(i) * 8);
+                const u32 action_id = static_cast<u32>(*reinterpret_cast<volatile u8*>(entry + 0x0));
+                if (action_id < min_action || action_id > max_action) continue;
+                volatile u32* score_ptr = reinterpret_cast<volatile u32*>(entry + 0x4);
+                const u32 native_score = *score_ptr;
+                if (!NativeScoreAllowed(native_score)) continue;
+                u32& action_count = ForcedCountForAction(action_id);
+                if (global_config.ai_bridge.switch_max_forces_per_action != 0 &&
+                    action_count >= global_config.ai_bridge.switch_max_forces_per_action) continue;
+
+                LogResolvedTeam(tag, state_ptr, hit);
+                const u16 switch_in_species = InferredSwitchSpeciesForAction(state_ptr, action_id);
+                const u16 active_species = CandidateActiveSpecies(state_ptr);
+                const s32 candidate_score = ScoreSwitchMatchupV20(state_ptr, active_species, switch_in_species, tag, hit);
+                if (candidate_score > best_score) {
+                    best_score = candidate_score;
+                    best_index = i;
+                    best_action = action_id;
+                }
+            }
+
+            if (best_index == 0xFFFFFFFF || best_score < 20) {
+                if (ShouldLog(hit)) {
+                    Logging.Log("[ai_bridge] %s v21_gate blocked_best best_score=%d threshold=20 action=%u\n", tag, best_score, best_action);
+                }
+                return;
+            }
+
+            const u64 entry = state_ptr + 0xC8 + (static_cast<u64>(best_index) * 8);
+            volatile u8* enabled = reinterpret_cast<volatile u8*>(entry + 0x1);
+            volatile u32* score_ptr = reinterpret_cast<volatile u32*>(entry + 0x4);
+            const u32 target_score = TargetScoreForAction(best_action);
+            if (!*enabled) { *enabled = 1; changed = 1; }
+            if (!global_config.ai_bridge.switch_native_score_only && *score_ptr < target_score) { *score_ptr = target_score; changed = 1; }
+            if (changed) {
+                AIBridge::policy_forced_total++;
+                ForcedCountForAction(best_action)++;
+                if (global_config.ai_bridge.switch_disable_after_force) {
+                    for (u32 j = 0; j < count; j++) {
+                        if (j == best_index) continue;
+                        const u64 other = state_ptr + 0xC8 + (static_cast<u64>(j) * 8);
+                        const u32 other_action = static_cast<u32>(*reinterpret_cast<volatile u8*>(other + 0x0));
+                        if (other_action >= min_action && other_action <= max_action) {
+                            *reinterpret_cast<volatile u8*>(other + 0x1) = 0;
+                        }
+                    }
+                }
+                if (ShouldLog(hit)) {
+                    Logging.Log("[ai_bridge] %s switch_policy_v21 best_row changed=%u total=%u action=%u best_score=%d target_score=%u matching=%u native_only=%u\n",
+                        tag, changed, AIBridge::policy_forced_total, best_action, best_score, target_score, matching,
+                        global_config.ai_bridge.switch_native_score_only ? 1 : 0);
+                    DumpCandidateTable("candidate_score_after_switch_policy_v21", state_ptr, hit);
+                }
+            }
+            return;
+        }
+
         for (u32 pass = 0; pass < 2 && changed < max_changed_this_hit; pass++) {
             for (u32 i = 0; i < count && changed < max_changed_this_hit; i++) {
                 const u64 entry = state_ptr + 0xC8 + (static_cast<u64>(i) * 8);
@@ -3103,7 +3175,7 @@ namespace AIBridge {
         }
 
         if (changed != 0 && ShouldLog(hit)) {
-            Logging.Log("[ai_bridge] %s switch_policy_v20 mode=%u changed=%u total=%u a2=%u a3=%u other=%u cooldown=%u score=%u matching=%u preferred=%u native_only=%u\n",
+            Logging.Log("[ai_bridge] %s switch_policy_v20_legacy mode=%u changed=%u total=%u a2=%u a3=%u other=%u cooldown=%u score=%u matching=%u preferred=%u native_only=%u\n",
                 tag, mode, changed,
                 AIBridge::policy_forced_total,
                 AIBridge::policy_forced_action2,
@@ -3114,7 +3186,7 @@ namespace AIBridge {
                 matching,
                 preferred_action,
                 global_config.ai_bridge.switch_native_score_only ? 1 : 0);
-            DumpCandidateTable("candidate_score_after_switch_policy_v20", state_ptr, hit);
+            DumpCandidateTable("candidate_score_after_switch_policy_v20_legacy_legacy", state_ptr, hit);
         }
     }
 
