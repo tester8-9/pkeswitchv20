@@ -1,0 +1,81 @@
+name: Temporary Webcamoid 9.4.0 Windows Build
+
+on:
+  push:
+    branches:
+      - tmp-webcamoid-940-build-20260809
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      TARGET_ARCH: x86_64
+      COMPILER: gcc
+      UPLOAD: 1
+    steps:
+      - name: Checkout temporary runner repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSYS2 and MinGW64 dependencies
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            ccache
+            cmake
+            git
+            make
+            ninja
+            pkgconf
+            python3
+            unzip
+            mingw-w64-x86_64-binutils
+            mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ffmpeg
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-qt6
+
+      - name: Fetch Webcamoid 9.4.0 public source
+        run: |
+          git clone --branch 9.4.0 --depth 1 https://github.com/webcamoid/webcamoid.git webcamoid-src
+          cd webcamoid-src
+          # The public source archive/tag has an optional private ExtraPlugins submodule.
+          # Do not initialize it; CMake only includes ExtraPlugins when its CMakeLists exists.
+          git rev-parse HEAD
+
+      - name: Install Webcamoid packaging dependencies
+        working-directory: webcamoid-src
+        run: ./ports/ci/windows-msys/install_deps.sh
+
+      - name: Build Webcamoid 9.4.0
+        working-directory: webcamoid-src
+        run: ./ports/ci/windows-msys/build.sh
+
+      - name: Deploy portable Windows package
+        working-directory: webcamoid-src
+        run: ./ports/ci/windows-msys/deploy.sh
+
+      - name: Show generated packages
+        working-directory: webcamoid-src
+        run: |
+          find webcamoid-packages/windows -maxdepth 1 -type f -print -exec ls -lh {} \;
+          sha256sum webcamoid-packages/windows/*
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: webcamoid-9.4.0-windows-public-source
+          path: webcamoid-src/webcamoid-packages/windows/*
+          if-no-files-found: error
+          retention-days: 7
